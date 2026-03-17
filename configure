@@ -15,27 +15,35 @@ CC=${CC:-gcc}
 AR=${AR:-ar}
 BUILDDIR="build"
 
+# --- Detect C23 flag (GCC 14+ uses -std=c23, older uses -std=c2x) ---
+
+if $CC -std=c23 -x c -E /dev/null >/dev/null 2>&1; then
+    CSTD="-std=c23"
+else
+    CSTD="-std=c2x"
+fi
+
 # --- Build mode ---
 
 MODE="${1:-release}"
 
 case "$MODE" in
     debug)
-        CFLAGS="-std=c23 -O0 -g3 -Wall -Wextra -Wpedantic"
+        CFLAGS="$CSTD -O0 -g3 -Wall -Wextra -Wpedantic"
         LDFLAGS="-static -no-pie"
         LDSCRIPT="lightc.ld"
         STRIP=""
         DESC="debug (no optimization, full debug symbols)"
         ;;
     release)
-        CFLAGS="-std=c23 -O2 -DNDEBUG -Wall -Wextra -Wpedantic"
+        CFLAGS="$CSTD -O2 -DNDEBUG -Wall -Wextra -Wpedantic"
         LDFLAGS="-static -no-pie"
         LDSCRIPT="lightc.ld"
         STRIP="strip \$out"
         DESC="release (optimized, stripped)"
         ;;
     tiny)
-        CFLAGS="-std=c23 -Os -DNDEBUG -Wall -Wextra -Wpedantic -fno-asynchronous-unwind-tables"
+        CFLAGS="$CSTD -Os -DNDEBUG -Wall -Wextra -Wpedantic -fno-asynchronous-unwind-tables"
         LDFLAGS="-static -no-pie"
         LDSCRIPT="lightc-tiny.ld"
         STRIP="strip \$out && objcopy --strip-section-headers \$out"
