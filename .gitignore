@@ -1,0 +1,21 @@
+# Build output
+build/
+build.ninja
+
+# Benchmark comparison binaries
+bench_comp/bench_heap
+bench_comp/bench_arena
+bench_comp/bench_string
+bench_comp/bench_thread
+bench_comp/bench_format
+
+# Editor/IDE
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
