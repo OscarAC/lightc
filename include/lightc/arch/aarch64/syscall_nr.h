@@ -52,6 +52,35 @@
 #define SYS_kill           129
 #define SYS_signalfd4      74
 
+/* filesystem */
+#define SYS_mount       40
+#define SYS_umount2     39
+#define SYS_pivot_root  41
+#define SYS_chdir       49
+#define SYS_fstat       80
+#define SYS_statx       291
+#define SYS_mknodat     33
+#define SYS_mkdirat     34
+#define SYS_symlinkat   36
+#define SYS_unlinkat    35
+#define SYS_readlinkat  78
+#define SYS_fchownat    54
+#define SYS_fchmodat    53
+#define SYS_faccessat2  439
+
+/* namespaces / containers */
+#define SYS_unshare      97
+#define SYS_setns        268
+#define SYS_sethostname  161
+#define SYS_prctl        167
+#define SYS_seccomp      277
+
+/* credentials */
+#define SYS_getuid    174
+#define SYS_setuid    146
+#define SYS_setgid    144
+#define SYS_setgroups 159
+
 /* io_uring (unified numbers across all architectures) */
 #define SYS_io_uring_setup    425
 #define SYS_io_uring_enter    426

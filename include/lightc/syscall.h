@@ -304,6 +304,135 @@ static inline lc_sysret lc_kernel_send_signal(int32_t pid, int32_t signal) {
     return lc_syscall2(SYS_kill, pid, signal);
 }
 
+/* --- Filesystem --- */
+
+/* mount flags */
+#define MS_RDONLY       1
+#define MS_NOSUID       2
+#define MS_NODEV        4
+#define MS_NOEXEC       8
+#define MS_REMOUNT      32
+#define MS_BIND         4096
+#define MS_REC          16384
+#define MS_PRIVATE      (1 << 18)
+#define MS_SLAVE        (1 << 19)
+
+/* umount flags */
+#define MNT_DETACH  2
+
+/* unlinkat flags */
+#define AT_REMOVEDIR  0x200
+
+/* faccessat2 flags */
+#define AT_EACCESS  0x200
+
+/* access modes */
+#define F_OK  0
+#define R_OK  4
+#define W_OK  2
+#define X_OK  1
+
+static inline lc_sysret lc_kernel_mount(const char *source, const char *target,
+                                         const char *fstype, uint64_t flags, const void *data) {
+    return lc_syscall5(SYS_mount, (int64_t)source, (int64_t)target,
+                       (int64_t)fstype, (int64_t)flags, (int64_t)data);
+}
+
+static inline lc_sysret lc_kernel_umount(const char *target, int32_t flags) {
+    return lc_syscall2(SYS_umount2, (int64_t)target, flags);
+}
+
+static inline lc_sysret lc_kernel_pivot_root(const char *new_root, const char *put_old) {
+    return lc_syscall2(SYS_pivot_root, (int64_t)new_root, (int64_t)put_old);
+}
+
+static inline lc_sysret lc_kernel_chdir(const char *path) {
+    return lc_syscall1(SYS_chdir, (int64_t)path);
+}
+
+static inline lc_sysret lc_kernel_mkdirat(int32_t dirfd, const char *path, int32_t mode) {
+    return lc_syscall3(SYS_mkdirat, dirfd, (int64_t)path, mode);
+}
+
+static inline lc_sysret lc_kernel_mknodat(int32_t dirfd, const char *path, int32_t mode, uint64_t dev) {
+    return lc_syscall4(SYS_mknodat, dirfd, (int64_t)path, mode, (int64_t)dev);
+}
+
+static inline lc_sysret lc_kernel_symlinkat(const char *target, int32_t dirfd, const char *linkpath) {
+    return lc_syscall3(SYS_symlinkat, (int64_t)target, dirfd, (int64_t)linkpath);
+}
+
+static inline lc_sysret lc_kernel_unlinkat(int32_t dirfd, const char *path, int32_t flags) {
+    return lc_syscall3(SYS_unlinkat, dirfd, (int64_t)path, flags);
+}
+
+static inline lc_sysret lc_kernel_readlinkat(int32_t dirfd, const char *path, char *buf, size_t bufsiz) {
+    return lc_syscall4(SYS_readlinkat, dirfd, (int64_t)path, (int64_t)buf, (int64_t)bufsiz);
+}
+
+static inline lc_sysret lc_kernel_fchownat(int32_t dirfd, const char *path,
+                                            uint32_t uid, uint32_t gid, int32_t flags) {
+    return lc_syscall5(SYS_fchownat, dirfd, (int64_t)path, uid, gid, flags);
+}
+
+static inline lc_sysret lc_kernel_fchmodat(int32_t dirfd, const char *path, int32_t mode, int32_t flags) {
+    return lc_syscall4(SYS_fchmodat, dirfd, (int64_t)path, mode, flags);
+}
+
+static inline lc_sysret lc_kernel_faccessat2(int32_t dirfd, const char *path, int32_t mode, int32_t flags) {
+    return lc_syscall4(SYS_faccessat2, dirfd, (int64_t)path, mode, flags);
+}
+
+/* --- Namespaces / Containers --- */
+
+/* clone flags for namespaces */
+#define CLONE_NEWNS     0x00020000
+#define CLONE_NEWUTS    0x04000000
+#define CLONE_NEWIPC    0x08000000
+#define CLONE_NEWUSER   0x10000000
+#define CLONE_NEWPID    0x20000000
+#define CLONE_NEWNET    0x40000000
+
+static inline lc_sysret lc_kernel_unshare(int32_t flags) {
+    return lc_syscall1(SYS_unshare, flags);
+}
+
+static inline lc_sysret lc_kernel_setns(int32_t fd, int32_t nstype) {
+    return lc_syscall2(SYS_setns, fd, nstype);
+}
+
+static inline lc_sysret lc_kernel_sethostname(const char *name, size_t len) {
+    return lc_syscall2(SYS_sethostname, (int64_t)name, (int64_t)len);
+}
+
+static inline lc_sysret lc_kernel_prctl(int32_t option, uint64_t arg2, uint64_t arg3,
+                                         uint64_t arg4, uint64_t arg5) {
+    return lc_syscall5(SYS_prctl, option, (int64_t)arg2, (int64_t)arg3,
+                       (int64_t)arg4, (int64_t)arg5);
+}
+
+static inline lc_sysret lc_kernel_seccomp(uint32_t op, uint32_t flags, void *args) {
+    return lc_syscall3(SYS_seccomp, op, flags, (int64_t)args);
+}
+
+/* --- Credentials --- */
+
+static inline uint32_t lc_kernel_getuid(void) {
+    return (uint32_t)lc_syscall0(SYS_getuid);
+}
+
+static inline lc_sysret lc_kernel_setuid(uint32_t uid) {
+    return lc_syscall1(SYS_setuid, uid);
+}
+
+static inline lc_sysret lc_kernel_setgid(uint32_t gid) {
+    return lc_syscall1(SYS_setgid, gid);
+}
+
+static inline lc_sysret lc_kernel_setgroups(size_t size, const uint32_t *list) {
+    return lc_syscall2(SYS_setgroups, (int64_t)size, (int64_t)list);
+}
+
 /* --- Async I/O --- */
 
 static inline lc_sysret lc_kernel_io_ring_setup(uint32_t entries, void *params) {
