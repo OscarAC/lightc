@@ -121,6 +121,7 @@ rule clean_cmd
 build \$builddir/start.o: as arch/\$arch/start.S
 build \$builddir/syscall.o: as arch/\$arch/syscall.S
 build \$builddir/thread_asm.o: as arch/\$arch/thread.S
+build \$builddir/clone_asm.o: as arch/\$arch/clone.S
 build \$builddir/coroutine_asm.o: as arch/\$arch/coroutine.S
 
 # --- Source objects ---
@@ -146,7 +147,7 @@ build \$builddir/lifecycle.o: cc src/lifecycle.c
 
 # --- Library ---
 
-build \$builddir/liblightc.a: ar \$builddir/start.o \$builddir/syscall.o \$builddir/thread_asm.o \$builddir/coroutine_asm.o \$builddir/mem.o \$builddir/string.o \$builddir/print.o \$builddir/memory.o \$builddir/heap.o \$builddir/thread.o \$builddir/io.o \$builddir/async.o \$builddir/socket.o \$builddir/coroutine.o \$builddir/format.o \$builddir/log.o \$builddir/time.o \$builddir/lightio.o \$builddir/library.o \$builddir/containers.o \$builddir/signal.o \$builddir/lifecycle.o
+build \$builddir/liblightc.a: ar \$builddir/start.o \$builddir/syscall.o \$builddir/thread_asm.o \$builddir/clone_asm.o \$builddir/coroutine_asm.o \$builddir/mem.o \$builddir/string.o \$builddir/print.o \$builddir/memory.o \$builddir/heap.o \$builddir/thread.o \$builddir/io.o \$builddir/async.o \$builddir/socket.o \$builddir/coroutine.o \$builddir/format.o \$builddir/log.o \$builddir/time.o \$builddir/lightio.o \$builddir/library.o \$builddir/containers.o \$builddir/signal.o \$builddir/lifecycle.o
 
 # --- Examples ---
 

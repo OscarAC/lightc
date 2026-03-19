@@ -114,6 +114,22 @@ static inline lc_sysret lc_kernel_fork(void) {
     return lc_syscall5(SYS_clone, 17 /* SIGCHLD */, 0, 0, 0, 0);
 }
 
+/*
+ * Clone a new process with the given flags and stack.
+ *
+ * Unlike raw SYS_clone, this is safe to use from C: fn and arg are placed
+ * on the child's stack before the syscall, so the child never accesses the
+ * parent's stack frame (which is unreachable after clone changes %rsp/sp).
+ *
+ * The child calls fn(arg) and then _exit_group — it never returns.
+ * The parent receives the child's PID (positive) or -errno (negative).
+ *
+ * The caller must allocate the stack (e.g., via lc_kernel_map_memory)
+ * and pass stack_top = base + size (stacks grow downward).
+ */
+lc_sysret lc_kernel_clone(int64_t flags, void *stack_top,
+                           int (*fn)(void *), void *arg);
+
 static inline lc_sysret lc_kernel_execute(const char *path, char *const argv[], char *const envp[]) {
     return lc_syscall3(SYS_execve, (int64_t)path, (int64_t)argv, (int64_t)envp);
 }
