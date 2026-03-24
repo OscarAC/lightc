@@ -21,9 +21,10 @@ int main(int argc, char **argv, char **envp) {
 
     /* --- Basic allocate/free --- */
     lc_print_string(STDOUT, S("heap_allocate_basic"));
-    uint64_t *num = lc_heap_allocate(sizeof(uint64_t));
+    lc_result_ptr num_r = lc_heap_allocate(sizeof(uint64_t));
+    uint64_t *num = num_r.value;
     *num = 42;
-    say_pass_fail(num != NULL && *num == 42);
+    say_pass_fail(!lc_ptr_is_err(num_r) && *num == 42);
 
     lc_print_string(STDOUT, S("heap_free_basic"));
     lc_heap_free(num);
@@ -36,12 +37,13 @@ int main(int argc, char **argv, char **envp) {
 
     /* --- Allocate zeroed --- */
     lc_print_string(STDOUT, S("heap_allocate_zeroed"));
-    uint8_t *zeroed = lc_heap_allocate_zeroed(128);
+    lc_result_ptr zeroed_r = lc_heap_allocate_zeroed(128);
+    uint8_t *zeroed = zeroed_r.value;
     bool all_zero = true;
     for (size_t i = 0; i < 128; i++) {
         if (zeroed[i] != 0) { all_zero = false; break; }
     }
-    say_pass_fail(zeroed != NULL && all_zero);
+    say_pass_fail(!lc_ptr_is_err(zeroed_r) && all_zero);
     lc_heap_free(zeroed);
 
     /* --- Multiple small allocations (same bucket) --- */
@@ -49,8 +51,9 @@ int main(int argc, char **argv, char **envp) {
     void *ptrs[16];
     bool ok = true;
     for (int i = 0; i < 16; i++) {
-        ptrs[i] = lc_heap_allocate(24);
-        if (ptrs[i] == NULL) { ok = false; break; }
+        lc_result_ptr r = lc_heap_allocate(24);
+        ptrs[i] = r.value;
+        if (lc_ptr_is_err(r)) { ok = false; break; }
         /* Write to verify no overlap */
         lc_bytes_fill(ptrs[i], (uint8_t)(i + 1), 24);
     }
@@ -77,8 +80,9 @@ int main(int argc, char **argv, char **envp) {
     };
     ok = true;
     for (size_t i = 0; i < sizeof(test_sizes) / sizeof(test_sizes[0]); i++) {
-        void *p = lc_heap_allocate(test_sizes[i]);
-        if (p == NULL) { ok = false; break; }
+        lc_result_ptr r = lc_heap_allocate(test_sizes[i]);
+        void *p = r.value;
+        if (lc_ptr_is_err(r)) { ok = false; break; }
         /* Write to full usable size */
         lc_bytes_fill(p, 0xBB, test_sizes[i]);
         lc_heap_free(p);
@@ -96,8 +100,9 @@ int main(int argc, char **argv, char **envp) {
                             1521, 1777, 2033, 2545, 3057, 3569};
     ok = true;
     for (size_t i = 0; i < sizeof(tight_sizes) / sizeof(tight_sizes[0]); i++) {
-        void *p = lc_heap_allocate(tight_sizes[i]);
-        if (p == NULL) { ok = false; break; }
+        lc_result_ptr r = lc_heap_allocate(tight_sizes[i]);
+        void *p = r.value;
+        if (lc_ptr_is_err(r)) { ok = false; break; }
         lc_bytes_fill(p, 0xCC, tight_sizes[i]);
         lc_heap_free(p);
     }
@@ -105,8 +110,9 @@ int main(int argc, char **argv, char **envp) {
 
     /* --- Large allocation (direct mmap) --- */
     lc_print_string(STDOUT, S("heap_large_allocate"));
-    char *big = lc_heap_allocate(8192);
-    say_pass_fail(big != NULL);
+    lc_result_ptr big_r = lc_heap_allocate(8192);
+    char *big = big_r.value;
+    say_pass_fail(!lc_ptr_is_err(big_r));
 
     lc_print_string(STDOUT, S("heap_large_write"));
     lc_bytes_fill(big, 'L', 8192);
@@ -118,35 +124,42 @@ int main(int argc, char **argv, char **envp) {
 
     /* --- Reallocate: grow within same bucket --- */
     lc_print_string(STDOUT, S("heap_reallocate_same_bucket"));
-    char *r = lc_heap_allocate(8);
+    lc_result_ptr r_r = lc_heap_allocate(8);
+    char *r = r_r.value;
     lc_bytes_copy(r, "hello!", 6);
-    char *r2 = lc_heap_reallocate(r, 14);
+    lc_result_ptr r2_r = lc_heap_reallocate(r, 14);
+    char *r2 = r2_r.value;
     say_pass_fail(r2 == r && lc_string_equal(r2, 5, "hello", 5));
 
     /* --- Reallocate: grow to bigger bucket --- */
     lc_print_string(STDOUT, S("heap_reallocate_bigger"));
-    char *r3 = lc_heap_reallocate(r2, 200);
-    say_pass_fail(r3 != NULL && lc_string_equal(r3, 5, "hello", 5));
+    lc_result_ptr r3_r = lc_heap_reallocate(r2, 200);
+    char *r3 = r3_r.value;
+    say_pass_fail(!lc_ptr_is_err(r3_r) && lc_string_equal(r3, 5, "hello", 5));
     lc_heap_free(r3);
 
     /* --- Reallocate: NULL ptr (acts as allocate) --- */
     lc_print_string(STDOUT, S("heap_reallocate_null"));
-    char *r4 = lc_heap_reallocate(NULL, 64);
-    say_pass_fail(r4 != NULL);
+    lc_result_ptr r4_r = lc_heap_reallocate(NULL, 64);
+    char *r4 = r4_r.value;
+    say_pass_fail(!lc_ptr_is_err(r4_r));
     lc_heap_free(r4);
 
     /* --- Reallocate: size 0 (acts as free) --- */
     lc_print_string(STDOUT, S("heap_reallocate_zero"));
-    char *r5 = lc_heap_allocate(64);
-    void *r6 = lc_heap_reallocate(r5, 0);
+    lc_result_ptr r5_r = lc_heap_allocate(64);
+    char *r5 = r5_r.value;
+    lc_result_ptr r6_r = lc_heap_reallocate(r5, 0);
+    void *r6 = r6_r.value;
     say_pass_fail(r6 == NULL);
 
     /* --- Stress: every size from 1 to 4096 --- */
     lc_print_string(STDOUT, S("heap_stress_all_sizes"));
     ok = true;
     for (size_t sz = 1; sz <= 4096; sz++) {
-        void *p = lc_heap_allocate(sz);
-        if (p == NULL) { ok = false; break; }
+        lc_result_ptr r = lc_heap_allocate(sz);
+        void *p = r.value;
+        if (lc_ptr_is_err(r)) { ok = false; break; }
         /* Write first and last byte */
         ((uint8_t *)p)[0] = 0xAA;
         ((uint8_t *)p)[sz - 1] = 0x55;
@@ -160,18 +173,19 @@ int main(int argc, char **argv, char **envp) {
     void *batch[BATCH];
     ok = true;
     for (int i = 0; i < BATCH; i++) {
-        batch[i] = lc_heap_allocate((size_t)(i * 13 % 4000) + 1);
-        if (batch[i] == NULL) { ok = false; break; }
+        lc_result_ptr r = lc_heap_allocate((size_t)(i * 13 % 4000) + 1);
+        batch[i] = r.value;
+        if (lc_ptr_is_err(r)) { ok = false; break; }
     }
     for (int i = 0; i < BATCH; i++) lc_heap_free(batch[i]);
     say_pass_fail(ok);
 
     /* --- Page reuse: free-then-alloc reuses page free list --- */
     lc_print_string(STDOUT, S("heap_page_reuse"));
-    void *first = lc_heap_allocate(100);
-    void *second = lc_heap_allocate(100);
+    void *first = lc_heap_allocate(100).value;
+    void *second = lc_heap_allocate(100).value;
     lc_heap_free(first);
-    void *reused = lc_heap_allocate(100);
+    void *reused = lc_heap_allocate(100).value;
     /* freed block should be reused from the same page */
     say_pass_fail(reused == first);
     lc_heap_free(second);
@@ -184,16 +198,18 @@ int main(int argc, char **argv, char **envp) {
     void *fill[FILL_COUNT];
     ok = true;
     for (int i = 0; i < FILL_COUNT; i++) {
-        fill[i] = lc_heap_allocate(16); /* smallest bucket: 32-byte blocks */
-        if (fill[i] == NULL) { ok = false; break; }
+        lc_result_ptr r = lc_heap_allocate(16); /* smallest bucket: 32-byte blocks */
+        fill[i] = r.value;
+        if (lc_ptr_is_err(r)) { ok = false; break; }
         ((uint8_t *)fill[i])[0] = (uint8_t)i;
     }
     /* Free all — page should become available for reuse */
     for (int i = 0; i < FILL_COUNT; i++) lc_heap_free(fill[i]);
     /* Allocate again — should reuse the same page */
     for (int i = 0; i < FILL_COUNT; i++) {
-        fill[i] = lc_heap_allocate(16);
-        if (fill[i] == NULL) { ok = false; break; }
+        lc_result_ptr r = lc_heap_allocate(16);
+        fill[i] = r.value;
+        if (lc_ptr_is_err(r)) { ok = false; break; }
     }
     for (int i = 0; i < FILL_COUNT; i++) lc_heap_free(fill[i]);
     say_pass_fail(ok);
@@ -204,8 +220,9 @@ int main(int argc, char **argv, char **envp) {
     void *multi[MULTI_COUNT];
     ok = true;
     for (int i = 0; i < MULTI_COUNT; i++) {
-        multi[i] = lc_heap_allocate(16);
-        if (multi[i] == NULL) { ok = false; break; }
+        lc_result_ptr r = lc_heap_allocate(16);
+        multi[i] = r.value;
+        if (lc_ptr_is_err(r)) { ok = false; break; }
     }
     for (int i = 0; i < MULTI_COUNT; i++) lc_heap_free(multi[i]);
     say_pass_fail(ok);
@@ -217,8 +234,9 @@ int main(int argc, char **argv, char **envp) {
     void *rptrs[RECLAIM_COUNT];
     ok = true;
     for (int i = 0; i < RECLAIM_COUNT; i++) {
-        rptrs[i] = lc_heap_allocate(100);
-        if (rptrs[i] == NULL) { ok = false; break; }
+        lc_result_ptr r = lc_heap_allocate(100);
+        rptrs[i] = r.value;
+        if (lc_ptr_is_err(r)) { ok = false; break; }
         lc_bytes_fill(rptrs[i], 0xDD, 100);
     }
     /* Free all — pages should be reclaimed via madvise */
@@ -227,8 +245,9 @@ int main(int argc, char **argv, char **envp) {
      * physical pages via madvise and the new allocations get
      * fresh zero pages from the kernel. */
     for (int i = 0; i < RECLAIM_COUNT; i++) {
-        rptrs[i] = lc_heap_allocate(100);
-        if (rptrs[i] == NULL) { ok = false; break; }
+        lc_result_ptr r = lc_heap_allocate(100);
+        rptrs[i] = r.value;
+        if (lc_ptr_is_err(r)) { ok = false; break; }
         /* After madvise + re-mmap touch, kernel gives zero pages.
          * Verify the old 0xDD fill is gone. */
         uint8_t *p = rptrs[i];

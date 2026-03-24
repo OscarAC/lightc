@@ -46,7 +46,7 @@ int main(int argc, char **argv, char **envp) {
         return 1;
     }
 
-    if (!lio_tcp_serve(loop, port, handle_echo)) {
+    if (lc_is_err(lio_tcp_serve(loop, port, handle_echo))) {
         lc_print_line(STDERR, S("failed to start server"));
         lio_loop_destroy(loop);
         return 1;

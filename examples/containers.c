@@ -35,15 +35,15 @@ static void test_array(void) {
     /* push and get */
     lc_print_string(STDOUT, S("array_push_get"));
     int32_t val = 42;
-    void *p = lc_array_push(&arr, &val);
+    lc_result_ptr push_r = lc_array_push(&arr, &val);
     int32_t *got = lc_array_get(&arr, 0);
-    say_pass_fail(p != NULL && *got == 42 && lc_array_count(&arr) == 1);
+    say_pass_fail(!lc_ptr_is_err(push_r) && *got == 42 && lc_array_count(&arr) == 1);
 
     /* push multiple */
     lc_print_string(STDOUT, S("array_push_multiple"));
     bool ok = true;
     for (int32_t i = 1; i <= 20; i++) {
-        if (!lc_array_push(&arr, &i)) { ok = false; break; }
+        if (lc_ptr_is_err(lc_array_push(&arr, &i))) { ok = false; break; }
     }
     say_pass_fail(ok && lc_array_count(&arr) == 21);
 
@@ -71,9 +71,9 @@ static void test_array(void) {
     /* insert */
     lc_print_string(STDOUT, S("array_insert"));
     int32_t vals[] = {10, 20, 30};
-    lc_array_push(&arr, &vals[0]);
-    lc_array_push(&arr, &vals[2]);
-    lc_array_insert(&arr, 1, &vals[1]); /* insert 20 between 10 and 30 */
+    (void)lc_array_push(&arr, &vals[0]);
+    (void)lc_array_push(&arr, &vals[2]);
+    (void)lc_array_insert(&arr, 1, &vals[1]); /* insert 20 between 10 and 30 */
     int32_t *a0 = lc_array_get(&arr, 0);
     int32_t *a1 = lc_array_get(&arr, 1);
     int32_t *a2 = lc_array_get(&arr, 2);
@@ -93,13 +93,13 @@ static void test_array(void) {
 
     /* reserve */
     lc_print_string(STDOUT, S("array_reserve"));
-    ok = lc_array_reserve(&arr, 1000);
+    ok = lc_is_ok(lc_array_reserve(&arr, 1000));
     say_pass_fail(ok && arr.capacity >= 1000);
 
     /* data pointer */
     lc_print_string(STDOUT, S("array_data_pointer"));
     int32_t v1 = 99;
-    lc_array_push(&arr, &v1);
+    (void)lc_array_push(&arr, &v1);
     void *data = lc_array_data(&arr);
     say_pass_fail(data != NULL && *(int32_t *)data == 99);
 
@@ -108,7 +108,7 @@ static void test_array(void) {
     lc_array_clear(&arr);
     ok = true;
     for (int32_t i = 0; i < 500; i++) {
-        if (!lc_array_push(&arr, &i)) { ok = false; break; }
+        if (lc_ptr_is_err(lc_array_push(&arr, &i))) { ok = false; break; }
     }
     /* verify integrity */
     for (int32_t i = 0; i < 500 && ok; i++) {
@@ -120,11 +120,11 @@ static void test_array(void) {
     lc_print_string(STDOUT, S("array_insert_front"));
     lc_array arr2 = lc_array_create(sizeof(int32_t));
     int32_t x = 3;
-    lc_array_push(&arr2, &x);
+    (void)lc_array_push(&arr2, &x);
     x = 1;
-    lc_array_insert(&arr2, 0, &x);
+    (void)lc_array_insert(&arr2, 0, &x);
     x = 2;
-    lc_array_insert(&arr2, 1, &x);
+    (void)lc_array_insert(&arr2, 1, &x);
     /* should be [1, 2, 3] */
     say_pass_fail(*(int32_t *)lc_array_get(&arr2, 0) == 1 &&
                   *(int32_t *)lc_array_get(&arr2, 1) == 2 &&
@@ -134,7 +134,7 @@ static void test_array(void) {
     /* remove from front */
     lc_print_string(STDOUT, S("array_remove_front"));
     lc_array arr3 = lc_array_create(sizeof(int32_t));
-    for (int32_t i = 0; i < 5; i++) lc_array_push(&arr3, &i);
+    for (int32_t i = 0; i < 5; i++) (void)lc_array_push(&arr3, &i);
     lc_array_remove(&arr3, 0);
     say_pass_fail(*(int32_t *)lc_array_get(&arr3, 0) == 1 && lc_array_count(&arr3) == 4);
     lc_array_destroy(&arr3);
@@ -171,23 +171,23 @@ static void test_hashmap(void) {
     /* set and get */
     lc_print_string(STDOUT, S("hashmap_set_get"));
     int32_t v1 = 100;
-    lc_hashmap_set(&map, "alpha", &v1);
+    (void)lc_hashmap_set(&map, "alpha", &v1);
     int32_t *got = lc_hashmap_get(&map, "alpha");
     say_pass_fail(got != NULL && *got == 100 && lc_hashmap_count(&map) == 1);
 
     /* overwrite */
     lc_print_string(STDOUT, S("hashmap_overwrite"));
     int32_t v2 = 200;
-    lc_hashmap_set(&map, "alpha", &v2);
+    (void)lc_hashmap_set(&map, "alpha", &v2);
     got = lc_hashmap_get(&map, "alpha");
     say_pass_fail(got != NULL && *got == 200 && lc_hashmap_count(&map) == 1);
 
     /* multiple keys */
     lc_print_string(STDOUT, S("hashmap_multiple_keys"));
     int32_t v3 = 300, v4 = 400, v5 = 500;
-    lc_hashmap_set(&map, "beta", &v3);
-    lc_hashmap_set(&map, "gamma", &v4);
-    lc_hashmap_set(&map, "delta", &v5);
+    (void)lc_hashmap_set(&map, "beta", &v3);
+    (void)lc_hashmap_set(&map, "gamma", &v4);
+    (void)lc_hashmap_set(&map, "delta", &v5);
     say_pass_fail(lc_hashmap_count(&map) == 4 &&
                   *(int32_t *)lc_hashmap_get(&map, "beta") == 300 &&
                   *(int32_t *)lc_hashmap_get(&map, "gamma") == 400 &&
@@ -241,7 +241,7 @@ static void test_hashmap(void) {
         keys[i][3] = (char)('0' + i % 10);
         keys[i][4] = '\0';
         values[i] = i * 7;
-        if (!lc_hashmap_set(&map, keys[i], &values[i])) { ok = false; break; }
+        if (lc_is_err(lc_hashmap_set(&map, keys[i], &values[i]))) { ok = false; break; }
     }
     say_pass_fail(ok && lc_hashmap_count(&map) == 200);
 
@@ -279,8 +279,8 @@ static void test_hashmap(void) {
     lc_print_string(STDOUT, S("hashmap_string_values"));
     lc_hashmap_destroy(&map);
     map = lc_hashmap_create();
-    lc_hashmap_set(&map, "name", (void *)"lightc");
-    lc_hashmap_set(&map, "lang", (void *)"c23");
+    (void)lc_hashmap_set(&map, "name", (void *)"lightc");
+    (void)lc_hashmap_set(&map, "lang", (void *)"c23");
     char *name = lc_hashmap_get(&map, "name");
     char *lang = lc_hashmap_get(&map, "lang");
     say_pass_fail(lc_string_equal(name, 6, "lightc", 6) &&
@@ -312,7 +312,7 @@ static void test_ringbuf(void) {
     /* push and pop */
     lc_print_string(STDOUT, S("ringbuf_push_pop"));
     int32_t val = 42;
-    bool pushed = lc_ringbuf_push(&ring, &val);
+    bool pushed = lc_is_ok(lc_ringbuf_push(&ring, &val));
     int32_t out;
     bool popped = lc_ringbuf_pop(&ring, &out);
     say_pass_fail(pushed && popped && out == 42);
@@ -320,7 +320,7 @@ static void test_ringbuf(void) {
     /* peek */
     lc_print_string(STDOUT, S("ringbuf_peek"));
     val = 99;
-    lc_ringbuf_push(&ring, &val);
+    (void)lc_ringbuf_push(&ring, &val);
     int32_t *peeked = lc_ringbuf_peek(&ring);
     say_pass_fail(peeked != NULL && *peeked == 99 && lc_ringbuf_count(&ring) == 1);
     lc_ringbuf_pop(&ring, &out); /* clean up */
@@ -333,14 +333,14 @@ static void test_ringbuf(void) {
     lc_print_string(STDOUT, S("ringbuf_fill_full"));
     bool ok = true;
     for (int32_t i = 0; i < 8; i++) {
-        if (!lc_ringbuf_push(&ring, &i)) { ok = false; break; }
+        if (lc_is_err(lc_ringbuf_push(&ring, &i))) { ok = false; break; }
     }
     say_pass_fail(ok && lc_ringbuf_is_full(&ring) && lc_ringbuf_count(&ring) == 8);
 
     /* push when full */
     lc_print_string(STDOUT, S("ringbuf_push_full"));
     val = 999;
-    say_pass_fail(!lc_ringbuf_push(&ring, &val));
+    say_pass_fail(lc_is_err(lc_ringbuf_push(&ring, &val)));
 
     /* pop all */
     lc_print_string(STDOUT, S("ringbuf_pop_all"));
@@ -356,13 +356,13 @@ static void test_ringbuf(void) {
 
     /* wrap-around: push capacity, pop half, push more */
     lc_print_string(STDOUT, S("ringbuf_wrap_around"));
-    for (int32_t i = 0; i < 8; i++) lc_ringbuf_push(&ring, &i);
+    for (int32_t i = 0; i < 8; i++) (void)lc_ringbuf_push(&ring, &i);
     /* Pop 4 */
     for (int32_t i = 0; i < 4; i++) lc_ringbuf_pop(&ring, &out);
     /* Push 4 more (these wrap around) */
     ok = true;
     for (int32_t i = 100; i < 104; i++) {
-        if (!lc_ringbuf_push(&ring, &i)) { ok = false; break; }
+        if (lc_is_err(lc_ringbuf_push(&ring, &i))) { ok = false; break; }
     }
     say_pass_fail(ok && lc_ringbuf_count(&ring) == 8 && lc_ringbuf_is_full(&ring));
 
@@ -377,13 +377,13 @@ static void test_ringbuf(void) {
 
     /* clear */
     lc_print_string(STDOUT, S("ringbuf_clear"));
-    for (int32_t i = 0; i < 5; i++) lc_ringbuf_push(&ring, &i);
+    for (int32_t i = 0; i < 5; i++) (void)lc_ringbuf_push(&ring, &i);
     lc_ringbuf_clear(&ring);
     say_pass_fail(lc_ringbuf_is_empty(&ring) && lc_ringbuf_count(&ring) == 0);
 
     /* count */
     lc_print_string(STDOUT, S("ringbuf_count"));
-    for (int32_t i = 0; i < 3; i++) lc_ringbuf_push(&ring, &i);
+    for (int32_t i = 0; i < 3; i++) (void)lc_ringbuf_push(&ring, &i);
     say_pass_fail(lc_ringbuf_count(&ring) == 3);
 
     /* stress: many push/pop cycles */
@@ -394,7 +394,7 @@ static void test_ringbuf(void) {
         /* push 4, pop 4 */
         for (int32_t i = 0; i < 4; i++) {
             int32_t v = cycle * 4 + i;
-            if (!lc_ringbuf_push(&ring, &v)) { ok = false; break; }
+            if (lc_is_err(lc_ringbuf_push(&ring, &v))) { ok = false; break; }
         }
         for (int32_t i = 0; i < 4; i++) {
             int32_t v;

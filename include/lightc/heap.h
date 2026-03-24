@@ -13,17 +13,17 @@
  * so lc_heap_free knows how to return it.
  */
 
-/* Allocate `size` bytes. Returns NULL on failure. */
-[[gnu::malloc, gnu::hot, gnu::alloc_size(1)]]
-void *lc_heap_allocate(size_t size);
+/* Allocate `size` bytes. */
+[[nodiscard, gnu::hot]]
+lc_result_ptr lc_heap_allocate(size_t size);
 
-/* Allocate `size` bytes, zero-filled. Returns NULL on failure. */
-[[gnu::malloc, gnu::hot, gnu::alloc_size(1)]]
-void *lc_heap_allocate_zeroed(size_t size);
+/* Allocate `size` bytes, zero-filled. */
+[[nodiscard, gnu::hot]]
+lc_result_ptr lc_heap_allocate_zeroed(size_t size);
 
-/* Resize an allocation. Returns NULL on failure (original untouched). */
-[[gnu::hot, gnu::alloc_size(2)]]
-void *lc_heap_reallocate(void *ptr, size_t new_size);
+/* Resize an allocation. On failure, original is untouched. */
+[[nodiscard, gnu::hot]]
+lc_result_ptr lc_heap_reallocate(void *ptr, size_t new_size);
 
 /* Free a heap allocation. NULL is safe to pass. */
 [[gnu::hot]]
@@ -72,5 +72,8 @@ void lc_heap_get_stats(lc_heap_stats *stats);
 
 /* Reset cumulative counters (no-op when LC_STATS=0). */
 void lc_heap_reset_stats(void);
+
+/* Return per-thread TLS slot array (used by lc_tls_get/set). */
+void **lc_heap_tls_slots(void);
 
 #endif /* LIGHTC_HEAP_H */

@@ -29,8 +29,8 @@ typedef struct {
 lc_ringbuf lc_ringbuf_create(size_t element_size, size_t min_capacity);
 void lc_ringbuf_destroy(lc_ringbuf *ring);
 
-/* Push element to tail. Returns false if full. */
-bool lc_ringbuf_push(lc_ringbuf *ring, const void *element);
+/* Push element to tail. error = LC_ERR_FULL if full. */
+[[nodiscard]] lc_result lc_ringbuf_push(lc_ringbuf *ring, const void *element);
 
 /* Pop element from head. Returns false if empty. */
 bool lc_ringbuf_pop(lc_ringbuf *ring, void *out);

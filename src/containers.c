@@ -56,29 +56,30 @@ void lc_array_destroy(lc_array *arr) {
     arr->capacity = 0;
 }
 
-bool lc_array_reserve(lc_array *arr, size_t min_capacity) {
-    if (min_capacity <= arr->capacity) return true;
+lc_result lc_array_reserve(lc_array *arr, size_t min_capacity) {
+    if (min_capacity <= arr->capacity) return lc_ok(0);
 
     size_t new_cap = arr->capacity ? arr->capacity : ARRAY_INITIAL_CAPACITY;
     while (new_cap < min_capacity) new_cap *= 2;
 
     size_t new_size = new_cap * arr->element_size;
-    uint8_t *new_data = lc_heap_reallocate(arr->data, new_size);
-    if (!new_data) return false;
+    lc_result_ptr alloc = lc_heap_reallocate(arr->data, new_size);
+    if (lc_ptr_is_err(alloc)) return lc_err(LC_ERR_NOMEM);
 
-    arr->data     = new_data;
+    arr->data     = alloc.value;
     arr->capacity = new_cap;
-    return true;
+    return lc_ok(0);
 }
 
-void *lc_array_push(lc_array *arr, const void *element) {
+lc_result_ptr lc_array_push(lc_array *arr, const void *element) {
     if (arr->count == arr->capacity) {
-        if (!lc_array_reserve(arr, arr->count + 1)) return NULL;
+        lc_result r = lc_array_reserve(arr, arr->count + 1);
+        if (lc_is_err(r)) return lc_err_ptr(LC_ERR_NOMEM);
     }
     uint8_t *dst = arr->data + arr->count * arr->element_size;
     lc_bytes_copy(dst, element, arr->element_size);
     arr->count++;
-    return dst;
+    return lc_ok_ptr(dst);
 }
 
 bool lc_array_pop(lc_array *arr, void *out) {
@@ -106,10 +107,11 @@ void lc_array_clear(lc_array *arr) {
     arr->count = 0;
 }
 
-void *lc_array_insert(lc_array *arr, size_t index, const void *element) {
-    if (index > arr->count) return NULL;
+lc_result_ptr lc_array_insert(lc_array *arr, size_t index, const void *element) {
+    if (index > arr->count) return lc_err_ptr(LC_ERR_INVAL);
     if (arr->count == arr->capacity) {
-        if (!lc_array_reserve(arr, arr->count + 1)) return NULL;
+        lc_result r = lc_array_reserve(arr, arr->count + 1);
+        if (lc_is_err(r)) return lc_err_ptr(LC_ERR_NOMEM);
     }
     uint8_t *slot = arr->data + index * arr->element_size;
     size_t tail_bytes = (arr->count - index) * arr->element_size;
@@ -118,7 +120,7 @@ void *lc_array_insert(lc_array *arr, size_t index, const void *element) {
     }
     lc_bytes_copy(slot, element, arr->element_size);
     arr->count++;
-    return slot;
+    return lc_ok_ptr(slot);
 }
 
 void lc_array_remove(lc_array *arr, size_t index) {
@@ -144,8 +146,9 @@ void *lc_array_data(const lc_array *arr) {
 
 static char *hashmap_copy_key(const char *key) {
     size_t len = lc_string_length(key);
-    char *copy = lc_heap_allocate(len + 1);
-    if (!copy) return NULL;
+    lc_result_ptr alloc = lc_heap_allocate(len + 1);
+    if (lc_ptr_is_err(alloc)) return NULL;
+    char *copy = alloc.value;
     lc_bytes_copy(copy, key, len + 1);
     return copy;
 }
@@ -220,8 +223,9 @@ static bool hashmap_insert_entry(lc_hashmap_entry *entries, size_t capacity,
 
 static bool hashmap_grow(lc_hashmap *map) {
     size_t new_cap = map->capacity ? map->capacity * 2 : HASHMAP_INITIAL_CAPACITY;
-    lc_hashmap_entry *new_entries = lc_heap_allocate_zeroed(new_cap * sizeof(lc_hashmap_entry));
-    if (!new_entries) return false;
+    lc_result_ptr alloc = lc_heap_allocate_zeroed(new_cap * sizeof(lc_hashmap_entry));
+    if (lc_ptr_is_err(alloc)) return false;
+    lc_hashmap_entry *new_entries = alloc.value;
 
     /* Re-insert all existing entries */
     if (map->entries) {
@@ -241,21 +245,21 @@ static bool hashmap_grow(lc_hashmap *map) {
     return true;
 }
 
-bool lc_hashmap_set(lc_hashmap *map, const char *key, void *value) {
+lc_result lc_hashmap_set(lc_hashmap *map, const char *key, void *value) {
     /* Grow if needed: check load factor or uninitialized */
     if (map->capacity == 0 || (map->count + 1) * 100 > map->capacity * HASHMAP_LOAD_PERCENT) {
-        if (!hashmap_grow(map)) return false;
+        if (!hashmap_grow(map)) return lc_err(LC_ERR_NOMEM);
     }
 
     uint32_t hash = fnv1a(key);
     char *key_copy = hashmap_copy_key(key);
-    if (!key_copy) return false;
+    if (!key_copy) return lc_err(LC_ERR_NOMEM);
 
     bool inserted = hashmap_insert_entry(map->entries, map->capacity, key_copy, value, hash);
     if (inserted) {
         map->count++;
     }
-    return true;
+    return lc_ok(0);
 }
 
 void *lc_hashmap_get(const lc_hashmap *map, const char *key) {
@@ -370,9 +374,9 @@ void lc_hashmap_iterate(const lc_hashmap *map,
 
 lc_ringbuf lc_ringbuf_create(size_t element_size, size_t min_capacity) {
     size_t capacity = next_power_of_2(min_capacity);
-    uint8_t *data = lc_heap_allocate(capacity * element_size);
+    lc_result_ptr alloc = lc_heap_allocate(capacity * element_size);
 
-    if (data == NULL) {
+    if (lc_ptr_is_err(alloc)) {
         return (lc_ringbuf){
             .data         = NULL,
             .element_size = element_size,
@@ -384,7 +388,7 @@ lc_ringbuf lc_ringbuf_create(size_t element_size, size_t min_capacity) {
     }
 
     return (lc_ringbuf){
-        .data         = data,
+        .data         = alloc.value,
         .element_size = element_size,
         .capacity     = capacity,
         .mask         = capacity - 1,
@@ -402,14 +406,14 @@ void lc_ringbuf_destroy(lc_ringbuf *ring) {
     ring->tail     = 0;
 }
 
-bool lc_ringbuf_push(lc_ringbuf *ring, const void *element) {
-    if (ring->data == NULL) return false;
-    if (lc_ringbuf_is_full(ring)) return false;
+lc_result lc_ringbuf_push(lc_ringbuf *ring, const void *element) {
+    if (ring->data == NULL) return lc_err(LC_ERR_FULL);
+    if (lc_ringbuf_is_full(ring)) return lc_err(LC_ERR_FULL);
 
     size_t offset = (ring->tail & ring->mask) * ring->element_size;
     lc_bytes_copy(ring->data + offset, element, ring->element_size);
     ring->tail++;
-    return true;
+    return lc_ok(0);
 }
 
 bool lc_ringbuf_pop(lc_ringbuf *ring, void *out) {

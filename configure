@@ -278,13 +278,48 @@ build \$builddir/test_time: link \$builddir/test_time.o \$builddir/liblightc.a
 build \$builddir/test_print.o: cc_test tests/test_print.c
 build \$builddir/test_print: link \$builddir/test_print.o \$builddir/liblightc.a
 
-build tests: phony \$builddir/test_string \$builddir/test_format \$builddir/test_containers \$builddir/test_memory \$builddir/test_heap \$builddir/test_thread \$builddir/test_coroutine \$builddir/test_io \$builddir/test_time \$builddir/test_print
+build \$builddir/test_async.o: cc_test tests/test_async.c
+build \$builddir/test_async: link \$builddir/test_async.o \$builddir/liblightc.a
+
+build \$builddir/test_socket.o: cc_test tests/test_socket.c
+build \$builddir/test_socket: link \$builddir/test_socket.o \$builddir/liblightc.a
+
+build \$builddir/test_log.o: cc_test tests/test_log.c
+build \$builddir/test_log: link \$builddir/test_log.o \$builddir/liblightc.a
+
+build \$builddir/test_signal.o: cc_test tests/test_signal.c
+build \$builddir/test_signal: link \$builddir/test_signal.o \$builddir/liblightc.a
+
+build \$builddir/test_lifecycle.o: cc_test tests/test_lifecycle.c
+build \$builddir/test_lifecycle: link \$builddir/test_lifecycle.o \$builddir/liblightc.a
+
+build \$builddir/test_library.o: cc_test tests/test_library.c
+build \$builddir/test_library: link \$builddir/test_library.o \$builddir/liblightc.a
+
+build \$builddir/test_thread_sync.o: cc_test tests/test_thread_sync.c
+build \$builddir/test_thread_sync: link \$builddir/test_thread_sync.o \$builddir/liblightc.a
+
+build tests: phony \$builddir/test_string \$builddir/test_format \$builddir/test_containers \$builddir/test_memory \$builddir/test_heap \$builddir/test_thread \$builddir/test_coroutine \$builddir/test_io \$builddir/test_time \$builddir/test_print \$builddir/test_async \$builddir/test_socket \$builddir/test_log \$builddir/test_signal \$builddir/test_lifecycle \$builddir/test_library \$builddir/test_thread_sync
 
 rule run_tests
   command = for t in \$in; do echo "--- \$\$t ---" && \$\$t || exit 1; done
   description = Running tests
 
-build test: run_tests \$builddir/test_string \$builddir/test_format \$builddir/test_containers \$builddir/test_memory \$builddir/test_heap \$builddir/test_thread \$builddir/test_coroutine \$builddir/test_io \$builddir/test_time \$builddir/test_print
+build test: run_tests \$builddir/test_string \$builddir/test_format \$builddir/test_containers \$builddir/test_memory \$builddir/test_heap \$builddir/test_thread \$builddir/test_coroutine \$builddir/test_io \$builddir/test_time \$builddir/test_print \$builddir/test_async \$builddir/test_socket \$builddir/test_log \$builddir/test_signal \$builddir/test_lifecycle \$builddir/test_library \$builddir/test_thread_sync
+
+# --- Install ---
+
+prefix = /usr/local
+
+rule install_cmd
+  command = mkdir -p \$\${DESTDIR}\$prefix/lib \$\${DESTDIR}\$prefix/include && \\
+    cp \$builddir/liblightc.a \$\${DESTDIR}\$prefix/lib/ && \\
+    cp -r include/lightc include/lightdata include/lightio \$\${DESTDIR}\$prefix/include/ && \\
+    mkdir -p \$\${DESTDIR}\$prefix/lib/pkgconfig && \\
+    sed "s|@PREFIX@|\$prefix|g" lightc.pc.in > \$\${DESTDIR}\$prefix/lib/pkgconfig/lightc.pc
+  description = Installing to \$prefix
+
+build install: install_cmd \$builddir/liblightc.a
 
 # --- Benchmarks ---
 

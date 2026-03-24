@@ -180,22 +180,6 @@ struct lc_library {
 };
 
 /* ========================================================================
- * Error handling
- * ======================================================================== */
-
-static const char *last_error = NULL;
-
-static void set_error(const char *msg) {
-    last_error = msg;
-}
-
-const char *lc_library_error(void) {
-    const char *err = last_error;
-    last_error = NULL;
-    return err;
-}
-
-/* ========================================================================
  * Internal helpers
  * ======================================================================== */
 
@@ -246,48 +230,42 @@ static uint32_t elf_hash_function(const char *name) {
  * ELF validation
  * ======================================================================== */
 
-static bool validate_elf_header(const Elf64_Ehdr *ehdr) {
+static int32_t validate_elf_header(const Elf64_Ehdr *ehdr) {
     /* Check magic bytes */
     if (ehdr->e_ident[0] != ELFMAG0 ||
         ehdr->e_ident[1] != ELFMAG1 ||
         ehdr->e_ident[2] != ELFMAG2 ||
         ehdr->e_ident[3] != ELFMAG3) {
-        set_error("not an ELF file (bad magic)");
-        return false;
+        return LC_ERR_BAD_ELF_MAGIC;
     }
 
     /* Must be 64-bit */
     if (ehdr->e_ident[4] != ELFCLASS64) {
-        set_error("not a 64-bit ELF file");
-        return false;
+        return LC_ERR_NOT_64BIT;
     }
 
     /* Must be little-endian */
     if (ehdr->e_ident[5] != ELFDATA2LSB) {
-        set_error("not a little-endian ELF file");
-        return false;
+        return LC_ERR_BAD_ELF_MAGIC;
     }
 
     /* Must be a shared object (ET_DYN) */
     if (ehdr->e_type != ET_DYN) {
-        set_error("not a shared object (expected ET_DYN)");
-        return false;
+        return LC_ERR_BAD_ELF_MAGIC;
     }
 
     /* Check machine type matches current arch */
 #if defined(__x86_64__)
     if (ehdr->e_machine != EM_X86_64) {
-        set_error("ELF machine type is not x86_64");
-        return false;
+        return LC_ERR_BAD_MACHINE;
     }
 #elif defined(__aarch64__)
     if (ehdr->e_machine != EM_AARCH64) {
-        set_error("ELF machine type is not aarch64");
-        return false;
+        return LC_ERR_BAD_MACHINE;
     }
 #endif
 
-    return true;
+    return LC_OK;
 }
 
 /* ========================================================================
@@ -540,49 +518,44 @@ static void *find_symbol_linear_scan(lc_library *lib, const char *name) {
  * Public API
  * ======================================================================== */
 
-lc_library *lc_library_open(const char *path) {
-    last_error = NULL;
-
+lc_result_ptr lc_library_open(const char *path) {
     /* --- Step 1: Open the file --- */
     lc_sysret fd_ret = lc_kernel_open_file(path, O_RDONLY, 0);
     if (fd_ret < 0) {
-        set_error("could not open file");
-        return NULL;
+        return lc_err_ptr(LC_ERR_NOENT);
     }
     int32_t fd = (int32_t)fd_ret;
 
     /* --- Step 2: Read and validate ELF header --- */
     Elf64_Ehdr ehdr;
     if (!read_all(fd, &ehdr, sizeof(ehdr))) {
-        set_error("could not read ELF header");
         lc_kernel_close_file(fd);
-        return NULL;
+        return lc_err_ptr(LC_ERR_IO);
     }
-    if (!validate_elf_header(&ehdr)) {
+    int32_t hdr_err = validate_elf_header(&ehdr);
+    if (hdr_err != LC_OK) {
         lc_kernel_close_file(fd);
-        return NULL;
+        return lc_err_ptr(hdr_err);
     }
 
     /* --- Step 3: Read program headers --- */
     size_t phdr_table_size = (size_t)ehdr.e_phnum * ehdr.e_phentsize;
-    Elf64_Phdr *phdrs = (Elf64_Phdr *)lc_heap_allocate(phdr_table_size);
-    if (!phdrs) {
-        set_error("could not allocate memory for program headers");
+    lc_result_ptr phdr_alloc = lc_heap_allocate(phdr_table_size);
+    if (lc_ptr_is_err(phdr_alloc)) {
         lc_kernel_close_file(fd);
-        return NULL;
+        return lc_err_ptr(LC_ERR_NOMEM);
     }
+    Elf64_Phdr *phdrs = (Elf64_Phdr *)phdr_alloc.value;
 
     if (lc_kernel_seek_position(fd, (int64_t)ehdr.e_phoff, SEEK_SET) < 0) {
-        set_error("could not seek to program headers");
         lc_heap_free(phdrs);
         lc_kernel_close_file(fd);
-        return NULL;
+        return lc_err_ptr(LC_ERR_IO);
     }
     if (!read_all(fd, phdrs, phdr_table_size)) {
-        set_error("could not read program headers");
         lc_heap_free(phdrs);
         lc_kernel_close_file(fd);
-        return NULL;
+        return lc_err_ptr(LC_ERR_IO);
     }
 
     /* --- Step 4: Compute total address span of LOAD segments --- */
@@ -603,10 +576,9 @@ lc_library *lc_library_open(const char *path) {
     }
 
     if (!found_load) {
-        set_error("no LOAD segments found in ELF file");
         lc_heap_free(phdrs);
         lc_kernel_close_file(fd);
-        return NULL;
+        return lc_err_ptr(LC_ERR_NO_LOAD_SEG);
     }
 
     /* Align min_vaddr down and max_vaddr up to page boundaries */
@@ -621,10 +593,9 @@ lc_library *lc_library_open(const char *path) {
         -1, 0
     );
     if (base_ptr == MAP_FAILED) {
-        set_error("mmap failed for library region");
         lc_heap_free(phdrs);
         lc_kernel_close_file(fd);
-        return NULL;
+        return lc_err_ptr(LC_ERR_NOMEM);
     }
     uint8_t *base = (uint8_t *)base_ptr;
 
@@ -638,18 +609,16 @@ lc_library *lc_library_open(const char *path) {
         uint64_t offset_in_map = phdrs[i].p_vaddr - min_vaddr;
 
         if (lc_kernel_seek_position(fd, (int64_t)phdrs[i].p_offset, SEEK_SET) < 0) {
-            set_error("could not seek to LOAD segment");
             lc_kernel_unmap_memory(base, total_size);
             lc_heap_free(phdrs);
             lc_kernel_close_file(fd);
-            return NULL;
+            return lc_err_ptr(LC_ERR_IO);
         }
         if (!read_all(fd, base + offset_in_map, (size_t)phdrs[i].p_filesz)) {
-            set_error("could not read LOAD segment data");
             lc_kernel_unmap_memory(base, total_size);
             lc_heap_free(phdrs);
             lc_kernel_close_file(fd);
-            return NULL;
+            return lc_err_ptr(LC_ERR_IO);
         }
         /* .bss (memsz > filesz) is already zero from MAP_ANONYMOUS */
     }
@@ -675,21 +644,20 @@ lc_library *lc_library_open(const char *path) {
             prot
         );
         if (ret < 0) {
-            set_error("mprotect failed for LOAD segment");
             lc_kernel_unmap_memory(base, total_size);
             lc_heap_free(phdrs);
-            return NULL;
+            return lc_err_ptr(LC_ERR_IO);
         }
     }
 
     /* --- Step 8: Allocate and initialize the library struct --- */
-    lc_library *lib = (lc_library *)lc_heap_allocate_zeroed(sizeof(lc_library));
-    if (!lib) {
-        set_error("could not allocate library struct");
+    lc_result_ptr lib_alloc = lc_heap_allocate_zeroed(sizeof(lc_library));
+    if (lc_ptr_is_err(lib_alloc)) {
         lc_kernel_unmap_memory(base, total_size);
         lc_heap_free(phdrs);
-        return NULL;
+        return lc_err_ptr(LC_ERR_NOMEM);
     }
+    lc_library *lib = (lc_library *)lib_alloc.value;
     lib->base = base;
     lib->total_size = total_size;
 
@@ -706,10 +674,9 @@ lc_library *lc_library_open(const char *path) {
     lc_heap_free(phdrs);
 
     if (!dynamic) {
-        set_error("no DYNAMIC segment found");
         lc_kernel_unmap_memory(base, total_size);
         lc_heap_free(lib);
-        return NULL;
+        return lc_err_ptr(LC_ERR_NO_DYNAMIC);
     }
 
     /* Walk the dynamic table. All d_ptr values are virtual addresses
@@ -778,10 +745,9 @@ lc_library *lc_library_open(const char *path) {
          * with the correct flags from the ELF. If not, we may need to temporarily
          * make it writable. For typical .so files, the data segment is already RW. */
         if (!process_relocations(lib)) {
-            set_error("relocation processing failed");
             lc_kernel_unmap_memory(base, total_size);
             lc_heap_free(lib);
-            return NULL;
+            return lc_err_ptr(LC_ERR_RELOC_FAILED);
         }
     }
 
@@ -799,28 +765,32 @@ lc_library *lc_library_open(const char *path) {
         }
     }
 
-    return lib;
+    return lc_ok_ptr(lib);
 }
 
-void *lc_library_find_symbol(lc_library *lib, const char *name) {
-    if (!lib || !name) return NULL;
+lc_result_ptr lc_library_find_symbol(lc_library *lib, const char *name) {
+    if (!lib || !name) return lc_err_ptr(LC_ERR_NOENT);
     if (!lib->symtab || !lib->strtab) {
-        set_error("library has no symbol table");
-        return NULL;
+        return lc_err_ptr(LC_ERR_NOENT);
     }
+
+    void *sym = NULL;
 
     /* Try GNU hash table first (fast O(1) lookup, most common) */
     if (lib->gnu_hash) {
-        return find_symbol_with_gnu_hash(lib, name);
+        sym = find_symbol_with_gnu_hash(lib, name);
     }
-
     /* Try ELF hash table (older format, still fast) */
-    if (lib->elf_hash) {
-        return find_symbol_with_elf_hash(lib, name);
+    else if (lib->elf_hash) {
+        sym = find_symbol_with_elf_hash(lib, name);
+    }
+    /* Fall back to linear scan */
+    else {
+        sym = find_symbol_linear_scan(lib, name);
     }
 
-    /* Fall back to linear scan */
-    return find_symbol_linear_scan(lib, name);
+    if (!sym) return lc_err_ptr(LC_ERR_NOENT);
+    return lc_ok_ptr(sym);
 }
 
 void lc_library_close(lc_library *lib) {

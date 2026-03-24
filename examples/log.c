@@ -108,7 +108,7 @@ int main(int argc, char **argv, char **envp) {
         /* Read back and verify */
         uint8_t *data;
         size_t size;
-        ok = lc_file_read_all(log_path, &data, &size);
+        ok = lc_is_ok(lc_file_read_all(log_path, &data, &size));
         if (ok) {
             ok = size > 0
               && lc_string_contains((const char *)data, size, S("logged to file"))
@@ -132,7 +132,7 @@ int main(int argc, char **argv, char **envp) {
         int32_t ids[LOG_THREADS];
         for (int i = 0; i < LOG_THREADS; i++) {
             ids[i] = i;
-            lc_thread_create(&threads[i], log_stress_thread, &ids[i]);
+            (void)lc_thread_create(&threads[i], log_stress_thread, &ids[i]);
         }
         for (int i = 0; i < LOG_THREADS; i++) {
             lc_thread_join(&threads[i]);
@@ -146,7 +146,7 @@ int main(int argc, char **argv, char **envp) {
          * - Every line starts with "[INFO " (no garbling) */
         uint8_t *data;
         size_t size;
-        ok = lc_file_read_all(stress_path, &data, &size);
+        ok = lc_is_ok(lc_file_read_all(stress_path, &data, &size));
         if (ok) {
             int line_count = 0;
             bool all_valid = true;

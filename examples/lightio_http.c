@@ -106,7 +106,7 @@ int main(int argc, char **argv, char **envp) {
         return 1;
     }
 
-    if (!lio_tcp_serve(loop, port, handle_http)) {
+    if (lc_is_err(lio_tcp_serve(loop, port, handle_http))) {
         lc_print_line(STDERR, "failed to start server", 22);
         lio_loop_destroy(loop);
         return 1;

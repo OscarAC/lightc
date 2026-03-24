@@ -18,7 +18,7 @@ static void signal_restorer(void) {
  * Internal helper: install a sigaction with the given handler and flags.
  * Handles arch-specific restorer setup.
  */
-static bool signal_set_action(int signo, void *handler) {
+static lc_result signal_set_action(int signo, void *handler) {
     lc_kernel_sigaction sa = {0};
     sa.handler = handler;
     sa.mask    = 0;
@@ -30,39 +30,39 @@ static bool signal_set_action(int signo, void *handler) {
     sa.flags = 0;
 #endif
 
-    return lc_syscall4(SYS_rt_sigaction, signo, (int64_t)&sa, 0, 8) >= 0;
+    return lc_result_from_sysret(lc_syscall4(SYS_rt_sigaction, signo, (int64_t)&sa, 0, 8));
 }
 
-bool lc_signal_handle(int signo, lc_signal_handler handler) {
+lc_result lc_signal_handle(int signo, lc_signal_handler handler) {
     return signal_set_action(signo, (void *)(uintptr_t)handler);
 }
 
-bool lc_signal_block(int signo) {
+lc_result lc_signal_block(int signo) {
     uint64_t mask = (uint64_t)1 << (signo - 1);
-    return lc_kernel_set_signal_mask(LC_SIG_BLOCK, &mask, NULL) >= 0;
+    return lc_result_from_sysret(lc_kernel_set_signal_mask(LC_SIG_BLOCK, &mask, NULL));
 }
 
-bool lc_signal_unblock(int signo) {
+lc_result lc_signal_unblock(int signo) {
     uint64_t mask = (uint64_t)1 << (signo - 1);
-    return lc_kernel_set_signal_mask(LC_SIG_UNBLOCK, &mask, NULL) >= 0;
+    return lc_result_from_sysret(lc_kernel_set_signal_mask(LC_SIG_UNBLOCK, &mask, NULL));
 }
 
 void lc_on_crash(lc_crash_handler handler) {
-    lc_signal_handle(LC_SIGSEGV, handler);
-    lc_signal_handle(LC_SIGBUS,  handler);
-    lc_signal_handle(LC_SIGABRT, handler);
+    (void)lc_signal_handle(LC_SIGSEGV, handler);
+    (void)lc_signal_handle(LC_SIGBUS,  handler);
+    (void)lc_signal_handle(LC_SIGABRT, handler);
 }
 
 void lc_on_shutdown(lc_signal_handler handler) {
-    lc_signal_handle(LC_SIGTERM, handler);
-    lc_signal_handle(LC_SIGINT,  handler);
+    (void)lc_signal_handle(LC_SIGTERM, handler);
+    (void)lc_signal_handle(LC_SIGINT,  handler);
 }
 
-bool lc_signal_ignore(int signo) {
+lc_result lc_signal_ignore(int signo) {
     return signal_set_action(signo, SIG_IGN);
 }
 
-bool lc_signal_reset(int signo) {
+lc_result lc_signal_reset(int signo) {
     lc_kernel_sigaction sa = {0};
     sa.handler = SIG_DFL;
     sa.flags   = 0;
@@ -70,5 +70,5 @@ bool lc_signal_reset(int signo) {
     sa.restorer = NULL;
 #endif
     sa.mask = 0;
-    return lc_syscall4(SYS_rt_sigaction, signo, (int64_t)&sa, 0, 8) >= 0;
+    return lc_result_from_sysret(lc_syscall4(SYS_rt_sigaction, signo, (int64_t)&sa, 0, 8));
 }

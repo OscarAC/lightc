@@ -33,4 +33,7 @@ void lc_print_hex(int32_t fd, uint64_t value);
 /* Print a single byte as two hex digits (no prefix). Useful for binary/ELF dumps. */
 void lc_print_byte_hex(int32_t fd, uint8_t value);
 
+/* Print a double with default precision. */
+void lc_print_double(int32_t fd, double value);
+
 #endif /* LIGHTC_PRINT_H */

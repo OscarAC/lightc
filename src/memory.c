@@ -7,13 +7,13 @@ static size_t align_up(size_t value, size_t alignment) {
 
 /* --- Raw page allocation --- */
 
-void *lc_allocate_pages(size_t count) {
+lc_result_ptr lc_allocate_pages(size_t count) {
     void *ptr = lc_kernel_map_memory(NULL, count * LC_PAGE_SIZE,
                                      PROT_READ | PROT_WRITE,
                                      MAP_PRIVATE | MAP_ANONYMOUS,
                                      -1, 0);
-    if (ptr == MAP_FAILED) return NULL;
-    return ptr;
+    if (ptr == MAP_FAILED) return lc_err_ptr(LC_ERR_NOMEM);
+    return lc_ok_ptr(ptr);
 }
 
 void lc_free_pages(void *ptr, size_t count) {
@@ -29,8 +29,9 @@ lc_arena lc_arena_create(size_t size) {
     size_t pages = align_up(size, LC_PAGE_SIZE) / LC_PAGE_SIZE;
     if (pages == 0) pages = 1;
 
-    void *mem = lc_allocate_pages(pages);
-    if (mem == NULL) return arena;
+    lc_result_ptr alloc = lc_allocate_pages(pages);
+    if (lc_ptr_is_err(alloc)) return arena;
+    void *mem = alloc.value;
 
     arena.base = mem;
     arena.capacity = pages * LC_PAGE_SIZE;

@@ -60,8 +60,9 @@ static int32_t heap_thread(void *arg) {
 
     /* Allocate and free from this thread */
     for (int i = 0; i < 1000; i++) {
-        void *p = lc_heap_allocate((size_t)(i % 200) + 1);
-        if (p == NULL) { *ok = 0; return 1; }
+        lc_result_ptr r = lc_heap_allocate((size_t)(i % 200) + 1);
+        void *p = r.value;
+        if (lc_ptr_is_err(r)) { *ok = 0; return 1; }
         ((uint8_t *)p)[0] = 0xAA;
         lc_heap_free(p);
     }
@@ -75,7 +76,7 @@ int main(int argc, char **argv, char **envp) {
     lc_print_string(STDOUT, S("thread_create_join"));
     int32_t result = 0;
     lc_thread t1;
-    bool ok = lc_thread_create(&t1, simple_thread, &result);
+    bool ok = lc_is_ok(lc_thread_create(&t1, simple_thread, &result));
     if (ok) lc_thread_join(&t1);
     say_pass_fail(ok && result == 42);
 
@@ -84,7 +85,7 @@ int main(int argc, char **argv, char **envp) {
     int32_t child_tid = 0;
     int32_t parent_tid = lc_kernel_get_thread_id();
     lc_thread t2;
-    ok = lc_thread_create(&t2, tid_thread, &child_tid);
+    ok = lc_is_ok(lc_thread_create(&t2, tid_thread, &child_tid));
     if (ok) lc_thread_join(&t2);
     say_pass_fail(ok && child_tid != 0 && child_tid != parent_tid);
 
@@ -102,7 +103,7 @@ int main(int argc, char **argv, char **envp) {
     ok = true;
     for (int i = 0; i < THREAD_COUNT; i++) {
         results[i] = 0;
-        if (!lc_thread_create(&threads[i], simple_thread, &results[i])) {
+        if (lc_is_err(lc_thread_create(&threads[i], simple_thread, &results[i]))) {
             ok = false;
             break;
         }
@@ -122,7 +123,7 @@ int main(int argc, char **argv, char **envp) {
     atomic_store(&shared_counter, 0);
     ok = true;
     for (int i = 0; i < COUNTER_THREADS; i++) {
-        if (!lc_thread_create(&cthreads[i], counter_thread, NULL)) {
+        if (lc_is_err(lc_thread_create(&cthreads[i], counter_thread, NULL))) {
             ok = false;
             break;
         }
@@ -155,7 +156,7 @@ int main(int argc, char **argv, char **envp) {
     ok = true;
     for (int i = 0; i < 4; i++) {
         hresults[i] = 0;
-        if (!lc_thread_create(&hthreads[i], heap_thread, &hresults[i])) {
+        if (lc_is_err(lc_thread_create(&hthreads[i], heap_thread, &hresults[i]))) {
             ok = false;
             break;
         }

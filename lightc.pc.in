@@ -1,0 +1,9 @@
+prefix=@PREFIX@
+includedir=${prefix}/include
+libdir=${prefix}/lib
+
+Name: lightc
+Description: Freestanding C runtime for Linux
+Version: 0.1.0
+Cflags: -I${includedir} -ffreestanding -nostdlib
+Libs: -L${libdir} -llightc

@@ -151,13 +151,13 @@ static uint32_t reap_completions(lc_async_ring *ring,
  * Public API
  * ======================================================================== */
 
-lc_async_ring *lc_async_ring_create(uint32_t queue_size) {
+lc_result_ptr lc_async_ring_create(uint32_t queue_size) {
     io_uring_params params;
     lc_bytes_fill(&params, 0, sizeof(params));
 
     /* Ask the kernel to create an io_uring instance */
     lc_sysret ret = lc_kernel_io_ring_setup(queue_size, &params);
-    if (ret < 0) return NULL;
+    if (ret < 0) return lc_err_ptr((int32_t)(-ret));
     int32_t ring_fd = (int32_t)ret;
 
     /* Calculate mmap sizes */
@@ -184,7 +184,7 @@ lc_async_ring *lc_async_ring_create(uint32_t queue_size) {
     );
     if (sq_ring_ptr == MAP_FAILED) {
         lc_kernel_close_file(ring_fd);
-        return NULL;
+        return lc_err_ptr(LC_ERR_NOMEM);
     }
 
     /* mmap the CQ ring (or reuse SQ mapping if single mmap) */
@@ -201,7 +201,7 @@ lc_async_ring *lc_async_ring_create(uint32_t queue_size) {
         if (cq_ring_ptr == MAP_FAILED) {
             lc_kernel_unmap_memory(sq_ring_ptr, sq_ring_size);
             lc_kernel_close_file(ring_fd);
-            return NULL;
+            return lc_err_ptr(LC_ERR_NOMEM);
         }
     }
 
@@ -218,20 +218,21 @@ lc_async_ring *lc_async_ring_create(uint32_t queue_size) {
             lc_kernel_unmap_memory(cq_ring_ptr, cq_ring_size);
         }
         lc_kernel_close_file(ring_fd);
-        return NULL;
+        return lc_err_ptr(LC_ERR_NOMEM);
     }
 
     /* Allocate the ring struct */
-    lc_async_ring *ring = lc_heap_allocate(sizeof(lc_async_ring));
-    if (ring == NULL) {
+    lc_result_ptr alloc = lc_heap_allocate(sizeof(lc_async_ring));
+    if (lc_ptr_is_err(alloc)) {
         lc_kernel_unmap_memory(sqes_ptr, sqes_size);
         lc_kernel_unmap_memory(sq_ring_ptr, sq_ring_size);
         if (!single_mmap) {
             lc_kernel_unmap_memory(cq_ring_ptr, cq_ring_size);
         }
         lc_kernel_close_file(ring_fd);
-        return NULL;
+        return lc_err_ptr(LC_ERR_NOMEM);
     }
+    lc_async_ring *ring = alloc.value;
 
     ring->fd = ring_fd;
 
@@ -268,7 +269,7 @@ lc_async_ring *lc_async_ring_create(uint32_t queue_size) {
         ring->sq_array[i] = i;
     }
 
-    return ring;
+    return lc_ok_ptr(ring);
 }
 
 void lc_async_ring_destroy(lc_async_ring *ring) {
@@ -293,8 +294,8 @@ void lc_async_ring_destroy(lc_async_ring *ring) {
 }
 
 /* Internal: prepare an SQE for a read or write operation */
-static bool submit_rw(lc_async_ring *ring, uint8_t opcode, int32_t fd,
-                      uint64_t addr, uint32_t len, uint64_t offset, uint64_t tag) {
+static lc_result submit_rw(lc_async_ring *ring, uint8_t opcode, int32_t fd,
+                           uint64_t addr, uint32_t len, uint64_t offset, uint64_t tag) {
     /* Check if SQ is full */
     uint32_t tail    = load_acquire(ring->sq_tail);
     uint32_t head    = load_acquire(ring->sq_head);
@@ -302,7 +303,7 @@ static bool submit_rw(lc_async_ring *ring, uint8_t opcode, int32_t fd,
     uint32_t mask    = *ring->sq_ring_mask;
 
     if (tail + ring->sq_pending - head >= entries) {
-        return false;  /* queue is full */
+        return lc_err(LC_ERR_AGAIN);  /* queue is full */
     }
 
     /* Get the next SQE slot */
@@ -324,19 +325,19 @@ static bool submit_rw(lc_async_ring *ring, uint8_t opcode, int32_t fd,
     ring->sq_array[(tail + ring->sq_pending) & mask] = index;
 
     ring->sq_pending++;
-    return true;
+    return lc_ok(0);
 }
 
-bool lc_async_submit_read(lc_async_ring *ring, int32_t fd,
-                          void *buf, uint32_t count,
-                          uint64_t offset, uint64_t tag) {
+lc_result lc_async_submit_read(lc_async_ring *ring, int32_t fd,
+                               void *buf, uint32_t count,
+                               uint64_t offset, uint64_t tag) {
     return submit_rw(ring, IORING_OP_READ, fd,
                      (uint64_t)(uintptr_t)buf, count, offset, tag);
 }
 
-bool lc_async_submit_write(lc_async_ring *ring, int32_t fd,
-                           const void *buf, uint32_t count,
-                           uint64_t offset, uint64_t tag) {
+lc_result lc_async_submit_write(lc_async_ring *ring, int32_t fd,
+                                const void *buf, uint32_t count,
+                                uint64_t offset, uint64_t tag) {
     return submit_rw(ring, IORING_OP_WRITE, fd,
                      (uint64_t)(uintptr_t)buf, count, offset, tag);
 }
@@ -377,9 +378,9 @@ uint32_t lc_async_peek(lc_async_ring *ring,
     return reap_completions(ring, results, max_results);
 }
 
-bool lc_async_submit_raw(lc_async_ring *ring, uint8_t opcode, int32_t fd,
-                         uint64_t addr, uint32_t len, uint64_t offset,
-                         uint32_t op_flags, uint64_t tag) {
+lc_result lc_async_submit_raw(lc_async_ring *ring, uint8_t opcode, int32_t fd,
+                              uint64_t addr, uint32_t len, uint64_t offset,
+                              uint32_t op_flags, uint64_t tag) {
     /* Check if SQ is full */
     uint32_t tail    = load_acquire(ring->sq_tail);
     uint32_t head    = load_acquire(ring->sq_head);
@@ -387,7 +388,7 @@ bool lc_async_submit_raw(lc_async_ring *ring, uint8_t opcode, int32_t fd,
     uint32_t mask    = *ring->sq_ring_mask;
 
     if (tail + ring->sq_pending - head >= entries) {
-        return false;  /* queue is full */
+        return lc_err(LC_ERR_AGAIN);  /* queue is full */
     }
 
     /* Get the next SQE slot */
@@ -410,7 +411,7 @@ bool lc_async_submit_raw(lc_async_ring *ring, uint8_t opcode, int32_t fd,
     ring->sq_array[(tail + ring->sq_pending) & mask] = index;
 
     ring->sq_pending++;
-    return true;
+    return lc_ok(0);
 }
 
 uint32_t lc_async_get_free_slots(const lc_async_ring *ring) {

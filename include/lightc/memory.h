@@ -117,9 +117,9 @@ static inline void lc_arena_get_stats(const lc_arena *arena, lc_arena_stats *sta
  * Raw page allocation — when you just want memory from the kernel.
  */
 
-/* Allocate `count` pages. Returns NULL on failure. */
-[[gnu::malloc]]
-void *lc_allocate_pages(size_t count);
+/* Allocate `count` pages. */
+[[nodiscard]]
+lc_result_ptr lc_allocate_pages(size_t count);
 
 /* Free `count` pages starting at `ptr`. */
 void lc_free_pages(void *ptr, size_t count);

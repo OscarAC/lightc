@@ -2,6 +2,7 @@
 #include <lightc/syscall.h>
 #include <lightc/string.h>
 #include <lightc/heap.h>
+#include <lightc/thread.h>
 
 /*
  * Verify that the assembly context-switch offsets match the C struct layout.
@@ -20,11 +21,25 @@ extern void lc_coroutine_switch(lc_coroutine_context *save,
                                 lc_coroutine_context *restore);
 
 /*
- * Global pointer to the currently active scheduler.
- * The trampoline and yield use this to find the running coroutine.
- * Only one scheduler can be running at a time (per thread).
+ * Per-thread pointer to the currently active scheduler.
+ * Uses thread-local storage so each thread can run its own scheduler.
  */
-static lc_scheduler *current_scheduler = NULL;
+static lc_tls_key scheduler_tls_key;
+static lc_once scheduler_tls_init = LC_ONCE_INIT;
+
+static void init_scheduler_tls(void) {
+    lc_tls_key_create(&scheduler_tls_key);
+}
+
+static lc_scheduler *get_current_scheduler(void) {
+    lc_call_once(&scheduler_tls_init, init_scheduler_tls);
+    return (lc_scheduler *)lc_tls_get(scheduler_tls_key);
+}
+
+static void set_current_scheduler(lc_scheduler *sched) {
+    lc_call_once(&scheduler_tls_init, init_scheduler_tls);
+    lc_tls_set(scheduler_tls_key, sched);
+}
 
 /*
  * Trampoline — entered when a coroutine is first switched to.
@@ -34,7 +49,7 @@ static lc_scheduler *current_scheduler = NULL;
  * and yields one last time to return control to the scheduler.
  */
 static void coroutine_trampoline(void) {
-    lc_scheduler *sched = current_scheduler;
+    lc_scheduler *sched = get_current_scheduler();
     lc_coroutine *co = &sched->coroutines[sched->current];
 
     /* Run the user's coroutine function */
@@ -59,7 +74,7 @@ lc_scheduler lc_scheduler_create_with_capacity(uint32_t max_coroutines) {
     lc_bytes_fill(&sched, 0, sizeof(sched));
     sched.capacity = max_coroutines;
     if (max_coroutines > 0) {
-        sched.coroutines = lc_heap_allocate_zeroed(max_coroutines * sizeof(lc_coroutine));
+        sched.coroutines = lc_heap_allocate_zeroed(max_coroutines * sizeof(lc_coroutine)).value;
     }
     return sched;
 }
@@ -147,7 +162,7 @@ lc_coroutine *lc_coroutine_create(lc_scheduler *sched, lc_coroutine_func func, v
 void lc_scheduler_run(lc_scheduler *sched) {
     if (sched->count == 0) return;
 
-    current_scheduler = sched;
+    set_current_scheduler(sched);
     sched->active_count = sched->count;
 
     /* Reset all coroutines to ready */
@@ -167,7 +182,7 @@ void lc_scheduler_run(lc_scheduler *sched) {
 }
 
 void lc_coroutine_yield(void) {
-    lc_scheduler *sched = current_scheduler;
+    lc_scheduler *sched = get_current_scheduler();
     uint32_t current_idx = sched->current;
     lc_coroutine *current_co = &sched->coroutines[current_idx];
 

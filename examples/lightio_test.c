@@ -49,7 +49,7 @@ static bool test_echo(void) {
         return false;
     }
 
-    if (!lio_tcp_serve(loop, TEST_PORT, echo_handler)) {
+    if (lc_is_err(lio_tcp_serve(loop, TEST_PORT, echo_handler))) {
         lc_print_line(STDERR, S("  FAIL: could not start server"));
         lio_loop_destroy(loop);
         return false;
@@ -57,7 +57,7 @@ static bool test_echo(void) {
 
     /* Start server in a background thread */
     lc_thread t;
-    if (!lc_thread_create(&t, server_thread, loop)) {
+    if (lc_is_err(lc_thread_create(&t, server_thread, loop))) {
         lc_print_line(STDERR, S("  FAIL: could not create server thread"));
         lio_loop_destroy(loop);
         return false;
@@ -67,26 +67,27 @@ static bool test_echo(void) {
     lc_time_sleep_milliseconds(50);
 
     /* Connect as a client */
-    int32_t fd = lc_socket_connect_to(127, 0, 0, 1, TEST_PORT);
-    if (fd < 0) {
+    lc_result r = lc_socket_connect_to(127, 0, 0, 1, TEST_PORT);
+    if (lc_is_err(r)) {
         lc_print_line(STDERR, S("  FAIL: could not connect"));
         lio_loop_stop(loop);
         lc_thread_join(&t);
         lio_loop_destroy(loop);
         return false;
     }
+    int32_t fd = (int32_t)r.value;
 
     /* Send test message */
     const char msg[] = "hello lightio";
-    lc_socket_send(fd, msg, sizeof(msg) - 1);
+    (void)lc_socket_send(fd, msg, sizeof(msg) - 1);
 
     /* Receive echo */
     char buf[64];
-    int64_t n = lc_socket_receive(fd, buf, sizeof(buf));
+    lc_result rr = lc_socket_receive(fd, buf, sizeof(buf));
     lc_socket_close(fd);
 
-    bool ok = (n == (int64_t)(sizeof(msg) - 1) &&
-               lc_string_equal(buf, (size_t)n, msg, sizeof(msg) - 1));
+    bool ok = (!lc_is_err(rr) && rr.value == (int64_t)(sizeof(msg) - 1) &&
+               lc_string_equal(buf, (size_t)rr.value, msg, sizeof(msg) - 1));
 
     /* Stop the server */
     lio_loop_stop(loop);
@@ -95,8 +96,8 @@ static bool test_echo(void) {
      * The event loop might be blocked in io_uring_enter (waiting for CQEs).
      * Connect briefly to trigger an accept completion and unblock it.
      */
-    int32_t wake_fd = lc_socket_connect_to(127, 0, 0, 1, TEST_PORT);
-    if (wake_fd >= 0) lc_socket_close(wake_fd);
+    r = lc_socket_connect_to(127, 0, 0, 1, TEST_PORT);
+    if (!lc_is_err(r)) lc_socket_close((int32_t)r.value);
 
     lc_thread_join(&t);
     lio_loop_destroy(loop);
@@ -116,18 +117,19 @@ static int32_t client_thread(void *arg) {
     /* Small delay to stagger connections */
     lc_time_sleep_milliseconds(10);
 
-    int32_t fd = lc_socket_connect_to(127, 0, 0, 1, port);
-    if (fd < 0) return 1;
+    lc_result r = lc_socket_connect_to(127, 0, 0, 1, port);
+    if (lc_is_err(r)) return 1;
+    int32_t fd = (int32_t)r.value;
 
     const char msg[] = "concurrent test";
-    lc_socket_send(fd, msg, sizeof(msg) - 1);
+    (void)lc_socket_send(fd, msg, sizeof(msg) - 1);
 
     char buf[64];
-    int64_t n = lc_socket_receive(fd, buf, sizeof(buf));
+    lc_result rr = lc_socket_receive(fd, buf, sizeof(buf));
     lc_socket_close(fd);
 
-    if (n == (int64_t)(sizeof(msg) - 1) &&
-        lc_string_equal(buf, (size_t)n, msg, sizeof(msg) - 1)) {
+    if (!lc_is_err(rr) && rr.value == (int64_t)(sizeof(msg) - 1) &&
+        lc_string_equal(buf, (size_t)rr.value, msg, sizeof(msg) - 1)) {
         atomic_fetch_add(&clients_passed, 1);
     }
 
@@ -139,13 +141,13 @@ static bool test_concurrent(void) {
     if (!loop) return false;
 
     uint16_t port = TEST_PORT + 1;
-    if (!lio_tcp_serve(loop, port, echo_handler)) {
+    if (lc_is_err(lio_tcp_serve(loop, port, echo_handler))) {
         lio_loop_destroy(loop);
         return false;
     }
 
     lc_thread server;
-    if (!lc_thread_create(&server, server_thread, loop)) {
+    if (lc_is_err(lc_thread_create(&server, server_thread, loop))) {
         lio_loop_destroy(loop);
         return false;
     }
@@ -158,7 +160,7 @@ static bool test_concurrent(void) {
     atomic_store(&clients_passed, 0);
 
     for (int i = 0; i < NUM_CLIENTS; i++) {
-        lc_thread_create(&clients[i], client_thread, &port);
+        (void)lc_thread_create(&clients[i], client_thread, &port);
     }
 
     /* Wait for all clients */
@@ -170,8 +172,8 @@ static bool test_concurrent(void) {
 
     /* Stop server */
     lio_loop_stop(loop);
-    int32_t wake_fd = lc_socket_connect_to(127, 0, 0, 1, port);
-    if (wake_fd >= 0) lc_socket_close(wake_fd);
+    lc_result wr = lc_socket_connect_to(127, 0, 0, 1, port);
+    if (!lc_is_err(wr)) lc_socket_close((int32_t)wr.value);
 
     lc_thread_join(&server);
     lio_loop_destroy(loop);
@@ -201,18 +203,19 @@ static int32_t mt_client_thread(void *arg) {
 
     lc_time_sleep_milliseconds(10);
 
-    int32_t fd = lc_socket_connect_to(127, 0, 0, 1, port);
-    if (fd < 0) return 1;
+    lc_result r = lc_socket_connect_to(127, 0, 0, 1, port);
+    if (lc_is_err(r)) return 1;
+    int32_t fd = (int32_t)r.value;
 
     const char msg[] = "threaded test";
-    lc_socket_send(fd, msg, sizeof(msg) - 1);
+    (void)lc_socket_send(fd, msg, sizeof(msg) - 1);
 
     char buf[64];
-    int64_t n = lc_socket_receive(fd, buf, sizeof(buf));
+    lc_result rr = lc_socket_receive(fd, buf, sizeof(buf));
     lc_socket_close(fd);
 
-    if (n == (int64_t)(sizeof(msg) - 1) &&
-        lc_string_equal(buf, (size_t)n, msg, sizeof(msg) - 1)) {
+    if (!lc_is_err(rr) && rr.value == (int64_t)(sizeof(msg) - 1) &&
+        lc_string_equal(buf, (size_t)rr.value, msg, sizeof(msg) - 1)) {
         atomic_fetch_add(&mt_clients_passed, 1);
     }
 
@@ -224,7 +227,7 @@ static bool test_threaded(void) {
     if (!loop) return false;
 
     uint16_t port = TEST_PORT + 2;
-    if (!lio_tcp_serve(loop, port, echo_handler)) {
+    if (lc_is_err(lio_tcp_serve(loop, port, echo_handler))) {
         lio_loop_destroy(loop);
         return false;
     }
@@ -232,7 +235,7 @@ static bool test_threaded(void) {
     /* Run server with 4 worker threads in a background thread */
     threaded_server_args sargs = { .loop = loop, .port = port };
     lc_thread server;
-    if (!lc_thread_create(&server, threaded_server_thread, &sargs)) {
+    if (lc_is_err(lc_thread_create(&server, threaded_server_thread, &sargs))) {
         lio_loop_destroy(loop);
         return false;
     }
@@ -245,7 +248,7 @@ static bool test_threaded(void) {
     atomic_store(&mt_clients_passed, 0);
 
     for (int i = 0; i < MT_CLIENTS; i++) {
-        lc_thread_create(&clients[i], mt_client_thread, &port);
+        (void)lc_thread_create(&clients[i], mt_client_thread, &port);
     }
 
     for (int i = 0; i < MT_CLIENTS; i++) {

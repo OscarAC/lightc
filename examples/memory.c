@@ -21,8 +21,9 @@ int main(int argc, char **argv, char **envp) {
 
     /* --- Raw page allocation --- */
     lc_print_string(STDOUT, S("allocate_pages"));
-    void *pages = lc_allocate_pages(2);
-    say_pass_fail(pages != NULL);
+    lc_result_ptr pages_r = lc_allocate_pages(2);
+    void *pages = pages_r.value;
+    say_pass_fail(!lc_ptr_is_err(pages_r));
 
     lc_print_string(STDOUT, S("free_pages"));
     lc_free_pages(pages, 2);

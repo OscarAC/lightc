@@ -44,7 +44,7 @@ void lio_loop_run_threaded(lio_loop *loop, uint32_t thread_count);
 /* --- TCP Server --- */
 
 /* Listen on port and call handler for each connection (one coroutine each). */
-bool lio_tcp_serve(lio_loop *loop, uint16_t port, lio_handler handler);
+[[nodiscard]] lc_result lio_tcp_serve(lio_loop *loop, uint16_t port, lio_handler handler);
 
 /* --- Async I/O (call from within a handler coroutine) --- */
 

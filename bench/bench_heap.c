@@ -12,7 +12,7 @@
 
 static void bench_alloc_free_16(bench_state *b) {
     for (int64_t i = 0; i < b->iterations; i++) {
-        void *p = lc_heap_allocate(16);
+        void *p = lc_heap_allocate(16).value;
         *(volatile char *)p = 0;
         lc_heap_free(p);
     }
@@ -20,7 +20,7 @@ static void bench_alloc_free_16(bench_state *b) {
 
 static void bench_alloc_free_64(bench_state *b) {
     for (int64_t i = 0; i < b->iterations; i++) {
-        void *p = lc_heap_allocate(64);
+        void *p = lc_heap_allocate(64).value;
         *(volatile char *)p = 0;
         lc_heap_free(p);
     }
@@ -28,7 +28,7 @@ static void bench_alloc_free_64(bench_state *b) {
 
 static void bench_alloc_free_256(bench_state *b) {
     for (int64_t i = 0; i < b->iterations; i++) {
-        void *p = lc_heap_allocate(256);
+        void *p = lc_heap_allocate(256).value;
         *(volatile char *)p = 0;
         lc_heap_free(p);
     }
@@ -36,7 +36,7 @@ static void bench_alloc_free_256(bench_state *b) {
 
 static void bench_alloc_free_2048(bench_state *b) {
     for (int64_t i = 0; i < b->iterations; i++) {
-        void *p = lc_heap_allocate(2048);
+        void *p = lc_heap_allocate(2048).value;
         *(volatile char *)p = 0;
         lc_heap_free(p);
     }
@@ -46,7 +46,7 @@ static void bench_alloc_free_2048(bench_state *b) {
 
 static void bench_alloc_free_large(bench_state *b) {
     for (int64_t i = 0; i < b->iterations; i++) {
-        void *p = lc_heap_allocate(8192);
+        void *p = lc_heap_allocate(8192).value;
         *(volatile char *)p = 0;
         lc_heap_free(p);
     }
@@ -56,7 +56,7 @@ static void bench_alloc_free_large(bench_state *b) {
 
 static void bench_alloc_zeroed_64(bench_state *b) {
     for (int64_t i = 0; i < b->iterations; i++) {
-        void *p = lc_heap_allocate_zeroed(64);
+        void *p = lc_heap_allocate_zeroed(64).value;
         *(volatile char *)p;
         lc_heap_free(p);
     }
@@ -66,9 +66,9 @@ static void bench_alloc_zeroed_64(bench_state *b) {
 
 static void bench_realloc_grow(bench_state *b) {
     for (int64_t i = 0; i < b->iterations; i++) {
-        void *p = lc_heap_allocate(32);
-        p = lc_heap_reallocate(p, 128);
-        p = lc_heap_reallocate(p, 512);
+        void *p = lc_heap_allocate(32).value;
+        p = lc_heap_reallocate(p, 128).value;
+        p = lc_heap_reallocate(p, 512).value;
         lc_heap_free(p);
     }
 }
@@ -81,7 +81,7 @@ static void bench_batch_64(bench_state *b) {
     void *ptrs[BATCH];
     for (int64_t i = 0; i < b->iterations; i++) {
         for (int j = 0; j < BATCH; j++)
-            ptrs[j] = lc_heap_allocate(64);
+            ptrs[j] = lc_heap_allocate(64).value;
         for (int j = 0; j < BATCH; j++)
             lc_heap_free(ptrs[j]);
     }
@@ -94,7 +94,7 @@ static void bench_mixed_sizes(bench_state *b) {
     void *ptrs[7];
     for (int64_t i = 0; i < b->iterations; i++) {
         for (int j = 0; j < 7; j++)
-            ptrs[j] = lc_heap_allocate(sizes[j]);
+            ptrs[j] = lc_heap_allocate(sizes[j]).value;
         for (int j = 0; j < 7; j++)
             lc_heap_free(ptrs[j]);
     }

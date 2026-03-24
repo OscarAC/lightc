@@ -21,8 +21,8 @@ static void test_thread_create_join(void) {
     lc_thread t;
     atomic_store(&shared_value, 0);
 
-    bool ok = lc_thread_create(&t, set_shared_value, (void *)(intptr_t)42);
-    TEST_ASSERT(ok);
+    lc_result r = lc_thread_create(&t, set_shared_value, (void *)(intptr_t)42);
+    TEST_ASSERT_OK(r);
 
     lc_thread_join(&t);
 
@@ -49,8 +49,8 @@ static void test_multiple_threads_atomic(void) {
     atomic_store(&atomic_counter, 0);
 
     for (int i = 0; i < NUM_THREADS; i++) {
-        bool ok = lc_thread_create(&threads[i], increment_counter, NULL);
-        TEST_ASSERT(ok);
+        lc_result r = lc_thread_create(&threads[i], increment_counter, NULL);
+        TEST_ASSERT_OK(r);
     }
 
     for (int i = 0; i < NUM_THREADS; i++) {
@@ -81,8 +81,8 @@ static void test_spinlock_contention(void) {
     lock.state = 0;
 
     for (int i = 0; i < NUM_THREADS; i++) {
-        bool ok = lc_thread_create(&threads[i], spinlock_increment, NULL);
-        TEST_ASSERT(ok);
+        lc_result r = lc_thread_create(&threads[i], spinlock_increment, NULL);
+        TEST_ASSERT_OK(r);
     }
 
     for (int i = 0; i < NUM_THREADS; i++) {
@@ -113,8 +113,8 @@ static void test_spinlock_try_acquire(void) {
     lc_spinlock_acquire(&try_lock);
 
     lc_thread t;
-    bool ok = lc_thread_create(&t, try_acquire_thread, NULL);
-    TEST_ASSERT(ok);
+    lc_result r = lc_thread_create(&t, try_acquire_thread, NULL);
+    TEST_ASSERT_OK(r);
 
     lc_thread_join(&t);
 
@@ -134,14 +134,14 @@ static _Atomic(int32_t) heap_alloc_ok;
 
 static int32_t thread_heap_alloc(void *arg) {
     (void)arg;
-    void *p = lc_heap_allocate(256);
-    if (p != NULL) {
+    lc_result_ptr r = lc_heap_allocate(256);
+    if (lc_ptr_is_ok(r)) {
         /* Write to verify it is usable memory */
-        uint8_t *bytes = (uint8_t *)p;
+        uint8_t *bytes = (uint8_t *)r.value;
         for (int i = 0; i < 256; i++) {
             bytes[i] = (uint8_t)i;
         }
-        lc_heap_free(p);
+        lc_heap_free(r.value);
         atomic_store(&heap_alloc_ok, 1);
     } else {
         atomic_store(&heap_alloc_ok, 0);
@@ -153,8 +153,8 @@ static void test_thread_heap_allocation(void) {
     atomic_store(&heap_alloc_ok, 0);
 
     lc_thread t;
-    bool ok = lc_thread_create(&t, thread_heap_alloc, NULL);
-    TEST_ASSERT(ok);
+    lc_result r = lc_thread_create(&t, thread_heap_alloc, NULL);
+    TEST_ASSERT_OK(r);
 
     lc_thread_join(&t);
 
@@ -182,14 +182,15 @@ static void test_cross_thread_heap_free(void) {
 
     /* Main thread allocates */
     for (int i = 0; i < CROSS_HEAP_COUNT; i++) {
-        cross_ptrs[i] = lc_heap_allocate(64);
-        TEST_ASSERT_NOT_NULL(cross_ptrs[i]);
+        lc_result_ptr pr = lc_heap_allocate(64);
+        TEST_ASSERT_PTR_OK(pr);
+        cross_ptrs[i] = pr.value;
     }
 
     /* Child thread frees */
     lc_thread t;
-    bool ok = lc_thread_create(&t, thread_free_memory, NULL);
-    TEST_ASSERT(ok);
+    lc_result r = lc_thread_create(&t, thread_free_memory, NULL);
+    TEST_ASSERT_OK(r);
 
     lc_thread_join(&t);
 

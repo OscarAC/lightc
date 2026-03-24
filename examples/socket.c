@@ -32,21 +32,22 @@ static int32_t tcp_server_thread(void *arg) {
     *ok = 0;
 
     /* Create, bind, listen */
-    int32_t server_fd = lc_socket_create(LC_SOCK_STREAM);
-    if (server_fd < 0) return 1;
+    lc_result r = lc_socket_create(LC_SOCK_STREAM);
+    if (lc_is_err(r)) return 1;
+    int32_t server_fd = (int32_t)r.value;
 
-    if (!lc_socket_set_reuse_address(server_fd)) {
+    if (lc_is_err(lc_socket_set_reuse_address(server_fd))) {
         lc_socket_close(server_fd);
         return 1;
     }
 
     lc_socket_address addr = lc_socket_address_any(TCP_PORT);
-    if (!lc_socket_bind(server_fd, &addr)) {
+    if (lc_is_err(lc_socket_bind(server_fd, &addr))) {
         lc_socket_close(server_fd);
         return 1;
     }
 
-    if (!lc_socket_listen(server_fd, 1)) {
+    if (lc_is_err(lc_socket_listen(server_fd, 1))) {
         lc_socket_close(server_fd);
         return 1;
     }
@@ -56,17 +57,18 @@ static int32_t tcp_server_thread(void *arg) {
 
     /* Accept one connection */
     lc_socket_address client_addr;
-    int32_t client_fd = lc_socket_accept(server_fd, &client_addr);
-    if (client_fd < 0) {
+    r = lc_socket_accept(server_fd, &client_addr);
+    if (lc_is_err(r)) {
         lc_socket_close(server_fd);
         return 1;
     }
+    int32_t client_fd = (int32_t)r.value;
 
     /* Receive message from client */
     char buf[64];
     lc_bytes_fill(buf, 0, sizeof(buf));
-    int64_t received = lc_socket_receive(client_fd, buf, sizeof(buf));
-    if (received <= 0) {
+    lc_result rr = lc_socket_receive(client_fd, buf, sizeof(buf));
+    if (lc_is_err(rr) || rr.value <= 0) {
         lc_socket_close(client_fd);
         lc_socket_close(server_fd);
         return 1;
@@ -75,7 +77,7 @@ static int32_t tcp_server_thread(void *arg) {
     /* Verify message */
     const char *expected = "hello from client";
     size_t expected_len = 17;
-    if (!lc_string_equal(buf, (size_t)received, expected, expected_len)) {
+    if (!lc_string_equal(buf, (size_t)rr.value, expected, expected_len)) {
         lc_socket_close(client_fd);
         lc_socket_close(server_fd);
         return 1;
@@ -84,8 +86,8 @@ static int32_t tcp_server_thread(void *arg) {
     /* Send response */
     const char *response = "hello from server";
     size_t response_len = 17;
-    int64_t sent = lc_socket_send(client_fd, response, response_len);
-    if (sent != (int64_t)response_len) {
+    lc_result sr = lc_socket_send(client_fd, response, response_len);
+    if (lc_is_err(sr) || sr.value != (int64_t)response_len) {
         lc_socket_close(client_fd);
         lc_socket_close(server_fd);
         return 1;
@@ -108,11 +110,12 @@ static int32_t tcp_client_thread(void *arg) {
     }
 
     /* Connect to server */
-    int32_t fd = lc_socket_create(LC_SOCK_STREAM);
-    if (fd < 0) return 1;
+    lc_result r = lc_socket_create(LC_SOCK_STREAM);
+    if (lc_is_err(r)) return 1;
+    int32_t fd = (int32_t)r.value;
 
     lc_socket_address addr = lc_socket_address_create(127, 0, 0, 1, TCP_PORT);
-    if (!lc_socket_connect(fd, &addr)) {
+    if (lc_is_err(lc_socket_connect(fd, &addr))) {
         lc_socket_close(fd);
         return 1;
     }
@@ -120,8 +123,8 @@ static int32_t tcp_client_thread(void *arg) {
     /* Send message */
     const char *msg = "hello from client";
     size_t msg_len = 17;
-    int64_t sent = lc_socket_send(fd, msg, msg_len);
-    if (sent != (int64_t)msg_len) {
+    lc_result sr = lc_socket_send(fd, msg, msg_len);
+    if (lc_is_err(sr) || sr.value != (int64_t)msg_len) {
         lc_socket_close(fd);
         return 1;
     }
@@ -129,8 +132,8 @@ static int32_t tcp_client_thread(void *arg) {
     /* Receive response */
     char buf[64];
     lc_bytes_fill(buf, 0, sizeof(buf));
-    int64_t received = lc_socket_receive(fd, buf, sizeof(buf));
-    if (received <= 0) {
+    lc_result rr = lc_socket_receive(fd, buf, sizeof(buf));
+    if (lc_is_err(rr) || rr.value <= 0) {
         lc_socket_close(fd);
         return 1;
     }
@@ -138,7 +141,7 @@ static int32_t tcp_client_thread(void *arg) {
     /* Verify response */
     const char *expected = "hello from server";
     size_t expected_len = 17;
-    if (!lc_string_equal(buf, (size_t)received, expected, expected_len)) {
+    if (!lc_string_equal(buf, (size_t)rr.value, expected, expected_len)) {
         lc_socket_close(fd);
         return 1;
     }
@@ -160,16 +163,17 @@ static int32_t udp_server_thread(void *arg) {
     int32_t *ok = (int32_t *)arg;
     *ok = 0;
 
-    int32_t fd = lc_socket_create(LC_SOCK_DGRAM);
-    if (fd < 0) return 1;
+    lc_result r = lc_socket_create(LC_SOCK_DGRAM);
+    if (lc_is_err(r)) return 1;
+    int32_t fd = (int32_t)r.value;
 
-    if (!lc_socket_set_reuse_address(fd)) {
+    if (lc_is_err(lc_socket_set_reuse_address(fd))) {
         lc_socket_close(fd);
         return 1;
     }
 
     lc_socket_address addr = lc_socket_address_any(UDP_PORT);
-    if (!lc_socket_bind(fd, &addr)) {
+    if (lc_is_err(lc_socket_bind(fd, &addr))) {
         lc_socket_close(fd);
         return 1;
     }
@@ -181,8 +185,8 @@ static int32_t udp_server_thread(void *arg) {
     char buf[64];
     lc_bytes_fill(buf, 0, sizeof(buf));
     lc_socket_address sender;
-    int64_t received = lc_socket_receive_from(fd, buf, sizeof(buf), &sender);
-    if (received <= 0) {
+    lc_result rr = lc_socket_receive_from(fd, buf, sizeof(buf), &sender);
+    if (lc_is_err(rr) || rr.value <= 0) {
         lc_socket_close(fd);
         return 1;
     }
@@ -190,7 +194,7 @@ static int32_t udp_server_thread(void *arg) {
     /* Verify */
     const char *expected = "udp hello";
     size_t expected_len = 9;
-    if (!lc_string_equal(buf, (size_t)received, expected, expected_len)) {
+    if (!lc_string_equal(buf, (size_t)rr.value, expected, expected_len)) {
         lc_socket_close(fd);
         return 1;
     }
@@ -198,8 +202,8 @@ static int32_t udp_server_thread(void *arg) {
     /* Send reply back to sender */
     const char *reply = "udp reply";
     size_t reply_len = 9;
-    int64_t sent = lc_socket_send_to(fd, reply, reply_len, &sender);
-    if (sent != (int64_t)reply_len) {
+    lc_result sr = lc_socket_send_to(fd, reply, reply_len, &sender);
+    if (lc_is_err(sr) || sr.value != (int64_t)reply_len) {
         lc_socket_close(fd);
         return 1;
     }
@@ -218,15 +222,16 @@ static int32_t udp_client_thread(void *arg) {
         /* spin */
     }
 
-    int32_t fd = lc_socket_create(LC_SOCK_DGRAM);
-    if (fd < 0) return 1;
+    lc_result r = lc_socket_create(LC_SOCK_DGRAM);
+    if (lc_is_err(r)) return 1;
+    int32_t fd = (int32_t)r.value;
 
     /* Send datagram to server */
     lc_socket_address dest = lc_socket_address_create(127, 0, 0, 1, UDP_PORT);
     const char *msg = "udp hello";
     size_t msg_len = 9;
-    int64_t sent = lc_socket_send_to(fd, msg, msg_len, &dest);
-    if (sent != (int64_t)msg_len) {
+    lc_result sr = lc_socket_send_to(fd, msg, msg_len, &dest);
+    if (lc_is_err(sr) || sr.value != (int64_t)msg_len) {
         lc_socket_close(fd);
         return 1;
     }
@@ -235,15 +240,15 @@ static int32_t udp_client_thread(void *arg) {
     char buf[64];
     lc_bytes_fill(buf, 0, sizeof(buf));
     lc_socket_address sender;
-    int64_t received = lc_socket_receive_from(fd, buf, sizeof(buf), &sender);
-    if (received <= 0) {
+    lc_result rr = lc_socket_receive_from(fd, buf, sizeof(buf), &sender);
+    if (lc_is_err(rr) || rr.value <= 0) {
         lc_socket_close(fd);
         return 1;
     }
 
     const char *expected = "udp reply";
     size_t expected_len = 9;
-    if (!lc_string_equal(buf, (size_t)received, expected, expected_len)) {
+    if (!lc_string_equal(buf, (size_t)rr.value, expected, expected_len)) {
         lc_socket_close(fd);
         return 1;
     }
@@ -266,31 +271,33 @@ static int32_t conv_server_thread(void *arg) {
     *ok = 0;
 
     /* Use convenience function: create + bind + listen */
-    int32_t server_fd = lc_socket_listen_on(CONV_PORT, 1);
-    if (server_fd < 0) return 1;
+    lc_result r = lc_socket_listen_on(CONV_PORT, 1);
+    if (lc_is_err(r)) return 1;
+    int32_t server_fd = (int32_t)r.value;
 
     /* Signal that we are listening */
     atomic_store_explicit(&conv_server_ready, 1, memory_order_release);
 
     /* Accept one connection */
-    int32_t client_fd = lc_socket_accept(server_fd, NULL);
-    if (client_fd < 0) {
+    r = lc_socket_accept(server_fd, NULL);
+    if (lc_is_err(r)) {
         lc_socket_close(server_fd);
         return 1;
     }
+    int32_t client_fd = (int32_t)r.value;
 
     /* Receive and echo back */
     char buf[64];
     lc_bytes_fill(buf, 0, sizeof(buf));
-    int64_t received = lc_socket_receive(client_fd, buf, sizeof(buf));
-    if (received <= 0) {
+    lc_result rr = lc_socket_receive(client_fd, buf, sizeof(buf));
+    if (lc_is_err(rr) || rr.value <= 0) {
         lc_socket_close(client_fd);
         lc_socket_close(server_fd);
         return 1;
     }
 
-    int64_t sent = lc_socket_send(client_fd, buf, (size_t)received);
-    if (sent != received) {
+    lc_result sr = lc_socket_send(client_fd, buf, (size_t)rr.value);
+    if (lc_is_err(sr) || sr.value != rr.value) {
         lc_socket_close(client_fd);
         lc_socket_close(server_fd);
         return 1;
@@ -312,14 +319,15 @@ static int32_t conv_client_thread(void *arg) {
     }
 
     /* Use convenience function: create + connect */
-    int32_t fd = lc_socket_connect_to(127, 0, 0, 1, CONV_PORT);
-    if (fd < 0) return 1;
+    lc_result r = lc_socket_connect_to(127, 0, 0, 1, CONV_PORT);
+    if (lc_is_err(r)) return 1;
+    int32_t fd = (int32_t)r.value;
 
     /* Send a message */
     const char *msg = "convenience test";
     size_t msg_len = 16;
-    int64_t sent = lc_socket_send(fd, msg, msg_len);
-    if (sent != (int64_t)msg_len) {
+    lc_result sr = lc_socket_send(fd, msg, msg_len);
+    if (lc_is_err(sr) || sr.value != (int64_t)msg_len) {
         lc_socket_close(fd);
         return 1;
     }
@@ -327,13 +335,13 @@ static int32_t conv_client_thread(void *arg) {
     /* Receive echo */
     char buf[64];
     lc_bytes_fill(buf, 0, sizeof(buf));
-    int64_t received = lc_socket_receive(fd, buf, sizeof(buf));
-    if (received <= 0) {
+    lc_result rr = lc_socket_receive(fd, buf, sizeof(buf));
+    if (lc_is_err(rr) || rr.value <= 0) {
         lc_socket_close(fd);
         return 1;
     }
 
-    if (!lc_string_equal(buf, (size_t)received, msg, msg_len)) {
+    if (!lc_string_equal(buf, (size_t)rr.value, msg, msg_len)) {
         lc_socket_close(fd);
         return 1;
     }
@@ -359,8 +367,8 @@ int main(int argc, char **argv, char **envp) {
         int32_t server_ok = 0, client_ok = 0;
         lc_thread server, client;
 
-        ok = lc_thread_create(&server, tcp_server_thread, &server_ok);
-        if (ok) ok = lc_thread_create(&client, tcp_client_thread, &client_ok);
+        ok = !lc_is_err(lc_thread_create(&server, tcp_server_thread, &server_ok));
+        if (ok) ok = !lc_is_err(lc_thread_create(&client, tcp_client_thread, &client_ok));
         if (ok) {
             lc_thread_join(&client);
             lc_thread_join(&server);
@@ -376,8 +384,8 @@ int main(int argc, char **argv, char **envp) {
         int32_t server_ok = 0, client_ok = 0;
         lc_thread server, client;
 
-        ok = lc_thread_create(&server, udp_server_thread, &server_ok);
-        if (ok) ok = lc_thread_create(&client, udp_client_thread, &client_ok);
+        ok = !lc_is_err(lc_thread_create(&server, udp_server_thread, &server_ok));
+        if (ok) ok = !lc_is_err(lc_thread_create(&client, udp_client_thread, &client_ok));
         if (ok) {
             lc_thread_join(&client);
             lc_thread_join(&server);
@@ -393,8 +401,8 @@ int main(int argc, char **argv, char **envp) {
         int32_t server_ok = 0, client_ok = 0;
         lc_thread server, client;
 
-        ok = lc_thread_create(&server, conv_server_thread, &server_ok);
-        if (ok) ok = lc_thread_create(&client, conv_client_thread, &client_ok);
+        ok = !lc_is_err(lc_thread_create(&server, conv_server_thread, &server_ok));
+        if (ok) ok = !lc_is_err(lc_thread_create(&client, conv_client_thread, &client_ok));
         if (ok) {
             lc_thread_join(&client);
             lc_thread_join(&server);
@@ -406,13 +414,14 @@ int main(int argc, char **argv, char **envp) {
     /* --- Shutdown test --- */
     lc_print_string(STDOUT, S("socket_shutdown"));
     {
-        int32_t fd = lc_socket_create(LC_SOCK_STREAM);
-        ok = fd >= 0;
+        lc_result r = lc_socket_create(LC_SOCK_STREAM);
+        ok = !lc_is_err(r);
         if (ok) {
+            int32_t fd = (int32_t)r.value;
             /* Shutdown on an unconnected socket should fail gracefully */
-            bool shut_ok = lc_socket_shutdown(fd, LC_SHUT_BOTH);
+            lc_result shut_r = lc_socket_shutdown(fd, LC_SHUT_BOTH);
             /* It's expected to fail (ENOTCONN), that's fine — just verify no crash */
-            (void)shut_ok;
+            (void)shut_r;
             lc_socket_close(fd);
         }
     }

@@ -25,8 +25,8 @@ typedef struct {
 lc_array lc_array_create(size_t element_size);
 void lc_array_destroy(lc_array *arr);
 
-/* Add element to the end. Returns pointer to the new element. */
-void *lc_array_push(lc_array *arr, const void *element);
+/* Add element to the end. value = pointer to the new element. */
+[[nodiscard]] lc_result_ptr lc_array_push(lc_array *arr, const void *element);
 
 /* Remove and copy last element. Returns false if empty. */
 bool lc_array_pop(lc_array *arr, void *out);
@@ -44,10 +44,10 @@ bool lc_array_is_empty(const lc_array *arr);
 void lc_array_clear(lc_array *arr);
 
 /* Ensure capacity for at least `min_capacity` elements. */
-bool lc_array_reserve(lc_array *arr, size_t min_capacity);
+[[nodiscard]] lc_result lc_array_reserve(lc_array *arr, size_t min_capacity);
 
-/* Insert element at index, shifting others right. */
-void *lc_array_insert(lc_array *arr, size_t index, const void *element);
+/* Insert element at index, shifting others right. value = pointer to inserted element. */
+[[nodiscard]] lc_result_ptr lc_array_insert(lc_array *arr, size_t index, const void *element);
 
 /* Remove element at index, shifting others left. */
 void lc_array_remove(lc_array *arr, size_t index);

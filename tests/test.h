@@ -104,6 +104,40 @@ static inline void _test_fail(const char *file, int line, const char *expr) {
         }                                                           \
     } while (0)
 
+/* --- Result assertion macros --- */
+
+#define TEST_ASSERT_OK(result)                                      \
+    do {                                                            \
+        lc_result _r = (result);                                    \
+        if (_r.error != 0) {                                        \
+            _test_fail(__FILE__, __LINE__, #result " is ok");       \
+        }                                                           \
+    } while (0)
+
+#define TEST_ASSERT_ERR(result)                                     \
+    do {                                                            \
+        lc_result _r = (result);                                    \
+        if (_r.error == 0) {                                        \
+            _test_fail(__FILE__, __LINE__, #result " is err");      \
+        }                                                           \
+    } while (0)
+
+#define TEST_ASSERT_PTR_OK(result)                                  \
+    do {                                                            \
+        lc_result_ptr _r = (result);                                \
+        if (_r.error != 0) {                                        \
+            _test_fail(__FILE__, __LINE__, #result " is ok");       \
+        }                                                           \
+    } while (0)
+
+#define TEST_ASSERT_PTR_ERR(result)                                 \
+    do {                                                            \
+        lc_result_ptr _r = (result);                                \
+        if (_r.error == 0) {                                        \
+            _test_fail(__FILE__, __LINE__, #result " is err");      \
+        }                                                           \
+    } while (0)
+
 /* --- Test runner --- */
 
 #define TEST_RUN(test_fn)                                           \

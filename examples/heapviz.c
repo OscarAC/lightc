@@ -231,7 +231,8 @@ static void cmd_alloc(const char *arg, size_t arg_len) {
     uint64_t size = parse_uint(arg, arg_len);
     if (size == 0) { putln("  usage: alloc <size>"); return; }
 
-    void *ptr = lc_heap_allocate((size_t)size);
+    lc_result_ptr r = lc_heap_allocate((size_t)size);
+    void *ptr = r.value;
     int32_t id = slot_alloc(ptr, (size_t)size);
     if (id < 0) {
         putln("  error: allocation failed or slots full");
@@ -251,7 +252,8 @@ static void cmd_zalloc(const char *arg, size_t arg_len) {
     uint64_t size = parse_uint(arg, arg_len);
     if (size == 0) { putln("  usage: zalloc <size>"); return; }
 
-    void *ptr = lc_heap_allocate_zeroed((size_t)size);
+    lc_result_ptr r = lc_heap_allocate_zeroed((size_t)size);
+    void *ptr = r.value;
     int32_t id = slot_alloc(ptr, (size_t)size);
     if (id < 0) {
         putln("  error: allocation failed or slots full");
@@ -299,11 +301,12 @@ static void cmd_realloc(const char *args, size_t args_len) {
         return;
     }
 
-    void *ptr = lc_heap_reallocate(slots[id], (size_t)new_size);
-    if (ptr == NULL) {
+    lc_result_ptr realloc_r = lc_heap_reallocate(slots[id], (size_t)new_size);
+    if (lc_ptr_is_err(realloc_r)) {
         putln("  error: realloc failed");
         return;
     }
+    void *ptr = realloc_r.value;
 
     slots[id] = ptr;
     size_t old = slot_sizes[id];
@@ -334,8 +337,8 @@ static void cmd_fill(const char *args, size_t args_len) {
 
     uint32_t ok = 0, fail = 0;
     for (uint64_t i = 0; i < count; i++) {
-        void *ptr = lc_heap_allocate((size_t)size);
-        if (slot_alloc(ptr, (size_t)size) >= 0) ok++;
+        lc_result_ptr r = lc_heap_allocate((size_t)size);
+        if (slot_alloc(r.value, (size_t)size) >= 0) ok++;
         else fail++;
     }
 

@@ -126,6 +126,7 @@ typedef struct lc_heap_local {
     int32_t tid;
     struct lc_heap_local *next;      /* hash chain */
     lc_heap_page *pages[BUCKET_COUNT]; /* per-bucket page list */
+    void *tls_slots[64];             /* per-thread TLS data (used by lc_tls_get/set) */
 } lc_heap_local;
 
 /* Hash table for thread-local heaps */
@@ -332,6 +333,17 @@ void *lc_heap_tls_sentinel(void) {
     return &tls_null_sentinel;
 }
 
+/* Forward declaration — defined below */
+static lc_heap_local *get_local(void);
+
+/* Return per-thread TLS slot array. Used by lc_tls_get/set in thread.c.
+ * Creates the thread-local heap if it doesn't exist yet. */
+void **lc_heap_tls_slots(void) {
+    lc_heap_local *local = get_local();
+    if (local == NULL) return NULL;
+    return local->tls_slots;
+}
+
 static bool main_thread_tls_ready = false;
 
 static lc_heap_local *get_local(void) {
@@ -517,7 +529,7 @@ static void remove_page_from_list(lc_heap_page **list_head, lc_heap_page *page) 
 
 /* --- Public API --- */
 
-void *lc_heap_allocate(size_t size) {
+lc_result_ptr lc_heap_allocate(size_t size) {
     if (size == 0) size = 1;
 
     uint32_t bucket = find_bucket(size);
@@ -550,8 +562,9 @@ void *lc_heap_allocate(size_t size) {
             atomic_fetch_add_explicit(&stat_large_cache_hits, 1, memory_order_relaxed);
 #endif
         } else {
-            block = lc_allocate_pages(pages);
-            if (__builtin_expect(block == NULL, 0)) return NULL;
+            lc_result_ptr page_alloc = lc_allocate_pages(pages);
+            if (__builtin_expect(lc_ptr_is_err(page_alloc), 0)) return lc_err_ptr(LC_ERR_NOMEM);
+            block = page_alloc.value;
         }
 
 #if LC_STATS
@@ -563,11 +576,11 @@ void *lc_heap_allocate(size_t size) {
         header->size = size;
         header->bucket = BUCKET_LARGE;
         header->magic = HEAP_MAGIC;
-        return block + HEADER_SIZE;
+        return lc_ok_ptr(block + HEADER_SIZE);
     }
 
     lc_heap_local *local = get_local();
-    if (__builtin_expect(local == NULL, 0)) return NULL;
+    if (__builtin_expect(local == NULL, 0)) return lc_err_ptr(LC_ERR_NOMEM);
 
     /* Walk our page list, drain remote frees, find a page with free blocks */
     lc_heap_page *page = local->pages[bucket];
@@ -584,7 +597,7 @@ void *lc_heap_allocate(size_t size) {
         page = get_fresh_page(bucket, local->tid);
         lc_spinlock_release(&heap_global_lock);
 
-        if (page == NULL) return NULL;
+        if (page == NULL) return lc_err_ptr(LC_ERR_NOMEM);
 
         /* Prepend to our page list */
         page->next = local->pages[bucket];
@@ -593,7 +606,7 @@ void *lc_heap_allocate(size_t size) {
 
     /* Allocate from bitmap — no lock, we own this page */
     void *block = bitmap_allocate_block(page);
-    if (block == NULL) return NULL;
+    if (block == NULL) return lc_err_ptr(LC_ERR_NOMEM);
 
     lc_heap_header *header = (lc_heap_header *)block;
     header->size = size;
@@ -601,14 +614,14 @@ void *lc_heap_allocate(size_t size) {
     header->magic = HEAP_MAGIC;
 
     stat_track_alloc(size);
-    return (uint8_t *)block + HEADER_SIZE;
+    return lc_ok_ptr((uint8_t *)block + HEADER_SIZE);
 }
 
-void *lc_heap_allocate_zeroed(size_t size) {
-    void *ptr = lc_heap_allocate(size);
-    if (ptr != NULL)
-        lc_bytes_fill(ptr, 0, size);
-    return ptr;
+lc_result_ptr lc_heap_allocate_zeroed(size_t size) {
+    lc_result_ptr alloc = lc_heap_allocate(size);
+    if (lc_ptr_is_ok(alloc))
+        lc_bytes_fill(alloc.value, 0, size);
+    return alloc;
 }
 
 void lc_heap_free(void *ptr) {
@@ -694,11 +707,11 @@ void lc_heap_free(void *ptr) {
     }
 }
 
-void *lc_heap_reallocate(void *ptr, size_t new_size) {
+lc_result_ptr lc_heap_reallocate(void *ptr, size_t new_size) {
     if (ptr == NULL) return lc_heap_allocate(new_size);
     if (new_size == 0) {
         lc_heap_free(ptr);
-        return NULL;
+        return lc_ok_ptr(NULL);
     }
 
     lc_heap_header *header = (lc_heap_header *)((uint8_t *)ptr - HEADER_SIZE);
@@ -718,18 +731,18 @@ void *lc_heap_reallocate(void *ptr, size_t new_size) {
             }
 #endif
             header->size = new_size;
-            return ptr;
+            return lc_ok_ptr(ptr);
         }
     }
 
-    void *new_ptr = lc_heap_allocate(new_size);
-    if (new_ptr == NULL) return NULL;
+    lc_result_ptr alloc = lc_heap_allocate(new_size);
+    if (lc_ptr_is_err(alloc)) return alloc;
 
     size_t copy_size = old_size < new_size ? old_size : new_size;
-    lc_bytes_copy(new_ptr, ptr, copy_size);
+    lc_bytes_copy(alloc.value, ptr, copy_size);
     lc_heap_free(ptr);
 
-    return new_ptr;
+    return alloc;
 }
 
 /* --- Statistics --- */

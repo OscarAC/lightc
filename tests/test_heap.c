@@ -9,8 +9,9 @@
 /* ===== lc_heap_allocate — basic ===== */
 
 static void test_heap_allocate_basic(void) {
-    void *ptr = lc_heap_allocate(64);
-    TEST_ASSERT_NOT_NULL(ptr);
+    lc_result_ptr r = lc_heap_allocate(64);
+    TEST_ASSERT_PTR_OK(r);
+    void *ptr = r.value;
 
     /* Write and read back */
     uint8_t *bytes = (uint8_t *)ptr;
@@ -27,16 +28,17 @@ static void test_heap_allocate_basic(void) {
 /* ===== lc_heap_allocate with size 0 ===== */
 
 static void test_heap_allocate_zero(void) {
-    void *ptr = lc_heap_allocate(0);
-    TEST_ASSERT_NOT_NULL(ptr);
-    lc_heap_free(ptr);
+    lc_result_ptr r = lc_heap_allocate(0);
+    TEST_ASSERT_PTR_OK(r);
+    lc_heap_free(r.value);
 }
 
 /* ===== lc_heap_allocate_zeroed ===== */
 
 static void test_heap_allocate_zeroed(void) {
-    void *ptr = lc_heap_allocate_zeroed(128);
-    TEST_ASSERT_NOT_NULL(ptr);
+    lc_result_ptr r = lc_heap_allocate_zeroed(128);
+    TEST_ASSERT_PTR_OK(r);
+    void *ptr = r.value;
 
     uint8_t *bytes = (uint8_t *)ptr;
     for (int i = 0; i < 128; i++) {
@@ -49,14 +51,14 @@ static void test_heap_allocate_zeroed(void) {
 /* ===== lc_heap_free — free and re-allocate ===== */
 
 static void test_heap_free_and_realloc(void) {
-    void *ptr = lc_heap_allocate(64);
-    TEST_ASSERT_NOT_NULL(ptr);
-    lc_heap_free(ptr);
+    lc_result_ptr r = lc_heap_allocate(64);
+    TEST_ASSERT_PTR_OK(r);
+    lc_heap_free(r.value);
 
     /* Re-allocate — should not crash */
-    void *ptr2 = lc_heap_allocate(64);
-    TEST_ASSERT_NOT_NULL(ptr2);
-    lc_heap_free(ptr2);
+    lc_result_ptr r2 = lc_heap_allocate(64);
+    TEST_ASSERT_PTR_OK(r2);
+    lc_heap_free(r2.value);
 }
 
 /* ===== lc_heap_free(NULL) ===== */
@@ -69,8 +71,9 @@ static void test_heap_free_null(void) {
 /* ===== lc_heap_reallocate — grow ===== */
 
 static void test_heap_reallocate_grow(void) {
-    void *ptr = lc_heap_allocate(16);
-    TEST_ASSERT_NOT_NULL(ptr);
+    lc_result_ptr r = lc_heap_allocate(16);
+    TEST_ASSERT_PTR_OK(r);
+    void *ptr = r.value;
 
     /* Write data */
     uint8_t *bytes = (uint8_t *)ptr;
@@ -79,8 +82,9 @@ static void test_heap_reallocate_grow(void) {
     }
 
     /* Grow */
-    void *ptr2 = lc_heap_reallocate(ptr, 256);
-    TEST_ASSERT_NOT_NULL(ptr2);
+    lc_result_ptr r2 = lc_heap_reallocate(ptr, 256);
+    TEST_ASSERT_PTR_OK(r2);
+    void *ptr2 = r2.value;
 
     /* Original data preserved */
     uint8_t *bytes2 = (uint8_t *)ptr2;
@@ -94,8 +98,9 @@ static void test_heap_reallocate_grow(void) {
 /* ===== lc_heap_reallocate — shrink ===== */
 
 static void test_heap_reallocate_shrink(void) {
-    void *ptr = lc_heap_allocate(256);
-    TEST_ASSERT_NOT_NULL(ptr);
+    lc_result_ptr r = lc_heap_allocate(256);
+    TEST_ASSERT_PTR_OK(r);
+    void *ptr = r.value;
 
     /* Write data */
     uint8_t *bytes = (uint8_t *)ptr;
@@ -104,8 +109,9 @@ static void test_heap_reallocate_shrink(void) {
     }
 
     /* Shrink */
-    void *ptr2 = lc_heap_reallocate(ptr, 32);
-    TEST_ASSERT_NOT_NULL(ptr2);
+    lc_result_ptr r2 = lc_heap_reallocate(ptr, 32);
+    TEST_ASSERT_PTR_OK(r2);
+    void *ptr2 = r2.value;
 
     /* First 32 bytes preserved */
     uint8_t *bytes2 = (uint8_t *)ptr2;
@@ -119,8 +125,9 @@ static void test_heap_reallocate_shrink(void) {
 /* ===== lc_heap_reallocate(NULL, size) — acts as allocate ===== */
 
 static void test_heap_reallocate_null(void) {
-    void *ptr = lc_heap_reallocate(NULL, 64);
-    TEST_ASSERT_NOT_NULL(ptr);
+    lc_result_ptr r = lc_heap_reallocate(NULL, 64);
+    TEST_ASSERT_PTR_OK(r);
+    void *ptr = r.value;
 
     /* Write and read */
     uint8_t *bytes = (uint8_t *)ptr;
@@ -135,11 +142,11 @@ static void test_heap_reallocate_null(void) {
 /* ===== lc_heap_reallocate(ptr, 0) — acts as free, returns NULL ===== */
 
 static void test_heap_reallocate_to_zero(void) {
-    void *ptr = lc_heap_allocate(64);
-    TEST_ASSERT_NOT_NULL(ptr);
+    lc_result_ptr r = lc_heap_allocate(64);
+    TEST_ASSERT_PTR_OK(r);
 
-    void *result = lc_heap_reallocate(ptr, 0);
-    TEST_ASSERT_NULL(result);
+    lc_result_ptr r2 = lc_heap_reallocate(r.value, 0);
+    TEST_ASSERT_NULL(r2.value);
 }
 
 /* ===== Various bucket sizes ===== */
@@ -149,8 +156,9 @@ static void test_heap_bucket_sizes(void) {
 
     for (int i = 0; i < 8; i++) {
         size_t sz = sizes[i];
-        void *ptr = lc_heap_allocate(sz);
-        TEST_ASSERT_NOT_NULL(ptr);
+        lc_result_ptr r = lc_heap_allocate(sz);
+        TEST_ASSERT_PTR_OK(r);
+        void *ptr = r.value;
 
         /* Write first and last byte */
         uint8_t *bytes = (uint8_t *)ptr;
@@ -168,8 +176,9 @@ static void test_heap_bucket_sizes(void) {
 static void test_heap_large_allocation(void) {
     /* Allocate > 4096 to trigger the BUCKET_LARGE / mmap path */
     size_t sz = 8192;
-    void *ptr = lc_heap_allocate(sz);
-    TEST_ASSERT_NOT_NULL(ptr);
+    lc_result_ptr r = lc_heap_allocate(sz);
+    TEST_ASSERT_PTR_OK(r);
+    void *ptr = r.value;
 
     /* Write and read across the allocation */
     uint8_t *bytes = (uint8_t *)ptr;
@@ -187,8 +196,9 @@ static void test_heap_large_allocation(void) {
 
 static void test_heap_alloc_free_cycles(void) {
     for (int i = 0; i < 100; i++) {
-        void *ptr = lc_heap_allocate(64);
-        TEST_ASSERT_NOT_NULL(ptr);
+        lc_result_ptr r = lc_heap_allocate(64);
+        TEST_ASSERT_PTR_OK(r);
+        void *ptr = r.value;
 
         /* Touch the memory */
         uint8_t *bytes = (uint8_t *)ptr;
@@ -206,8 +216,9 @@ static void test_heap_stress(void) {
     void *ptrs[STRESS_COUNT];
 
     for (int i = 0; i < STRESS_COUNT; i++) {
-        ptrs[i] = lc_heap_allocate(16);
-        TEST_ASSERT_NOT_NULL(ptrs[i]);
+        lc_result_ptr r = lc_heap_allocate(16);
+        TEST_ASSERT_PTR_OK(r);
+        ptrs[i] = r.value;
 
         /* Write a marker */
         uint8_t *bytes = (uint8_t *)ptrs[i];
@@ -227,8 +238,9 @@ static void test_heap_stress(void) {
 
     /* Allocate again to verify allocator still works */
     for (int i = 0; i < STRESS_COUNT; i++) {
-        ptrs[i] = lc_heap_allocate(16);
-        TEST_ASSERT_NOT_NULL(ptrs[i]);
+        lc_result_ptr r = lc_heap_allocate(16);
+        TEST_ASSERT_PTR_OK(r);
+        ptrs[i] = r.value;
     }
     for (int i = 0; i < STRESS_COUNT; i++) {
         lc_heap_free(ptrs[i]);
@@ -245,9 +257,9 @@ static void test_heap_stats(void) {
     /* API should work regardless of LC_STATS */
     lc_heap_reset_stats();
 
-    void *a = lc_heap_allocate(100);
-    void *b = lc_heap_allocate(200);
-    void *c = lc_heap_allocate(300);
+    void *a = lc_heap_allocate(100).value;
+    void *b = lc_heap_allocate(200).value;
+    void *c = lc_heap_allocate(300).value;
 
 #if LC_STATS
     lc_heap_get_stats(&after);
@@ -266,13 +278,13 @@ static void test_heap_stats(void) {
     TEST_ASSERT(after.peak_active_bytes >= 600);
 
     /* Large allocation tracking */
-    void *big = lc_heap_allocate(16384);
+    void *big = lc_heap_allocate(16384).value;
     lc_heap_get_stats(&after);
     TEST_ASSERT(after.large_allocations >= 1);
     lc_heap_free(big);
 
     /* Cache hit on second large alloc of same size */
-    void *big2 = lc_heap_allocate(16384);
+    void *big2 = lc_heap_allocate(16384).value;
     lc_heap_get_stats(&after);
     TEST_ASSERT(after.large_cache_hits >= 1);
     lc_heap_free(big2);

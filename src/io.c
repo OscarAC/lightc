@@ -10,7 +10,8 @@
 lc_writer lc_writer_create(int32_t fd, size_t buffer_size) {
     lc_writer w;
     w.fd       = fd;
-    w.buffer   = lc_heap_allocate(buffer_size);
+    lc_result_ptr alloc = lc_heap_allocate(buffer_size);
+    w.buffer   = alloc.value;
     w.capacity = w.buffer ? buffer_size : 0;
     w.used     = 0;
     return w;
@@ -136,7 +137,8 @@ void lc_writer_put_newline(lc_writer *writer) {
 lc_reader lc_reader_create(int32_t fd, size_t buffer_size) {
     lc_reader r;
     r.fd          = fd;
-    r.buffer      = lc_heap_allocate(buffer_size);
+    lc_result_ptr alloc = lc_heap_allocate(buffer_size);
+    r.buffer      = alloc.value;
     r.capacity    = r.buffer ? buffer_size : 0;
     r.filled      = 0;
     r.position    = 0;
@@ -244,19 +246,19 @@ bool lc_reader_is_end(const lc_reader *reader) {
  * File Utilities
  * ======================================================================== */
 
-bool lc_file_read_all(const char *path, uint8_t **out_data, size_t *out_size) {
+lc_result lc_file_read_all(const char *path, uint8_t **out_data, size_t *out_size) {
     *out_data = NULL;
     *out_size = 0;
 
     lc_sysret fd_ret = lc_kernel_open_file(path, O_RDONLY, 0);
-    if (fd_ret < 0) return false;
+    if (fd_ret < 0) return lc_err((int32_t)(-fd_ret));
     int32_t fd = (int32_t)fd_ret;
 
     /* Get file size via seek to end */
     lc_sysret end = lc_kernel_seek_position(fd, 0, SEEK_END);
     if (end < 0) {
         lc_kernel_close_file(fd);
-        return false;
+        return lc_err((int32_t)(-end));
     }
     size_t file_size = (size_t)end;
 
@@ -264,7 +266,7 @@ bool lc_file_read_all(const char *path, uint8_t **out_data, size_t *out_size) {
     lc_sysret start = lc_kernel_seek_position(fd, 0, SEEK_SET);
     if (start < 0) {
         lc_kernel_close_file(fd);
-        return false;
+        return lc_err((int32_t)(-start));
     }
 
     /* Handle empty files */
@@ -272,14 +274,15 @@ bool lc_file_read_all(const char *path, uint8_t **out_data, size_t *out_size) {
         lc_kernel_close_file(fd);
         *out_data = NULL;
         *out_size = 0;
-        return true;
+        return lc_ok(0);
     }
 
     /* Allocate buffer */
-    uint8_t *data = lc_heap_allocate(file_size);
+    lc_result_ptr alloc = lc_heap_allocate(file_size);
+    uint8_t *data = alloc.value;
     if (data == NULL) {
         lc_kernel_close_file(fd);
-        return false;
+        return lc_err(LC_ERR_NOMEM);
     }
 
     /* Read the entire file */
@@ -294,17 +297,17 @@ bool lc_file_read_all(const char *path, uint8_t **out_data, size_t *out_size) {
 
     if (total != file_size) {
         lc_heap_free(data);
-        return false;
+        return lc_err(LC_ERR_IO);
     }
 
     *out_data = data;
     *out_size = file_size;
-    return true;
+    return lc_ok((int64_t)file_size);
 }
 
-bool lc_file_write_all(const char *path, const void *data, size_t size) {
+lc_result lc_file_write_all(const char *path, const void *data, size_t size) {
     lc_sysret fd_ret = lc_kernel_open_file(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (fd_ret < 0) return false;
+    if (fd_ret < 0) return lc_err((int32_t)(-fd_ret));
     int32_t fd = (int32_t)fd_ret;
 
     size_t written = 0;
@@ -313,25 +316,25 @@ bool lc_file_write_all(const char *path, const void *data, size_t size) {
                                               size - written);
         if (ret <= 0) {
             lc_kernel_close_file(fd);
-            return false;
+            return lc_err(ret < 0 ? (int32_t)(-ret) : LC_ERR_IO);
         }
         written += (size_t)ret;
     }
 
     lc_kernel_close_file(fd);
-    return true;
+    return lc_ok((int64_t)size);
 }
 
-int64_t lc_file_get_size(const char *path) {
+lc_result lc_file_get_size(const char *path) {
     lc_sysret fd_ret = lc_kernel_open_file(path, O_RDONLY, 0);
-    if (fd_ret < 0) return -1;
+    if (fd_ret < 0) return lc_err((int32_t)(-fd_ret));
     int32_t fd = (int32_t)fd_ret;
 
     lc_sysret end = lc_kernel_seek_position(fd, 0, SEEK_END);
     lc_kernel_close_file(fd);
 
-    if (end < 0) return -1;
-    return (int64_t)end;
+    if (end < 0) return lc_err((int32_t)(-end));
+    return lc_ok(end);
 }
 
 /* ========================================================================
@@ -350,15 +353,15 @@ struct linux_dirent64 {
     char     d_name[];
 };
 
-bool lc_directory_open(lc_directory *dir, const char *path) {
+lc_result lc_directory_open(lc_directory *dir, const char *path) {
     lc_sysret fd_ret = lc_kernel_open_file(path, O_RDONLY, 0);
-    if (fd_ret < 0) return false;
+    if (fd_ret < 0) return lc_err((int32_t)(-fd_ret));
 
     dir->fd       = (int32_t)fd_ret;
     dir->filled   = 0;
     dir->position = 0;
     dir->done     = false;
-    return true;
+    return lc_ok((int64_t)dir->fd);
 }
 
 bool lc_directory_next(lc_directory *dir, lc_directory_entry *entry) {

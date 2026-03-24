@@ -1,4 +1,5 @@
 #include <lightc/print.h>
+#include <lightc/format.h>
 #include <lightc/syscall.h>
 
 void lc_print_char(int32_t fd, char c) {
@@ -74,4 +75,12 @@ void lc_print_byte_hex(int32_t fd, uint8_t value) {
         hex_digits[value & 0xf]
     };
     lc_kernel_write_bytes(fd, pair, 2);
+}
+
+void lc_print_double(int32_t fd, double value) {
+    char buf[32];
+    lc_format fmt = lc_format_start(buf, sizeof(buf));
+    lc_format_add_double(&fmt, value);
+    size_t len = lc_format_finish(&fmt);
+    lc_kernel_write_bytes(fd, buf, len);
 }

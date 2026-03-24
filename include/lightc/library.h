@@ -15,16 +15,13 @@
 
 typedef struct lc_library lc_library;
 
-/* Load a shared library (.so file). Returns NULL on failure. */
-lc_library *lc_library_open(const char *path);
+/* Load a shared library (.so file). */
+[[nodiscard]] lc_result_ptr lc_library_open(const char *path);
 
-/* Find a symbol (function or variable) by name. Returns NULL if not found. */
-void *lc_library_find_symbol(lc_library *lib, const char *name);
+/* Find a symbol (function or variable) by name. */
+[[nodiscard]] lc_result_ptr lc_library_find_symbol(lc_library *lib, const char *name);
 
 /* Unload the library and free resources. */
 void lc_library_close(lc_library *lib);
-
-/* Get the last error message (or NULL if no error). */
-const char *lc_library_error(void);
 
 #endif /* LIGHTC_LIBRARY_H */

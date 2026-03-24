@@ -57,7 +57,7 @@ static void bench_arena_alloc_aligned(bench_state *b) {
 
 static void bench_page_alloc_free(bench_state *b) {
     for (int64_t i = 0; i < b->iterations; i++) {
-        void *p = lc_allocate_pages(1);
+        void *p = lc_allocate_pages(1).value;
         *(volatile char *)p = 0;
         lc_free_pages(p, 1);
     }

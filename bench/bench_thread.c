@@ -19,7 +19,7 @@ static int32_t noop_thread(void *arg) {
 static void bench_thread_create_join(bench_state *b) {
     lc_thread t;
     for (int64_t i = 0; i < b->iterations; i++) {
-        lc_thread_create(&t, noop_thread, NULL);
+        (void)lc_thread_create(&t, noop_thread, NULL);
         lc_thread_join(&t);
     }
 }

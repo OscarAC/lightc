@@ -27,8 +27,8 @@ typedef struct {
 typedef struct lc_async_ring lc_async_ring;
 
 /* Create an async I/O ring with the given queue depth.
- * Returns NULL on failure. Caller must destroy with lc_async_ring_destroy. */
-lc_async_ring *lc_async_ring_create(uint32_t queue_size);
+ * Caller must destroy with lc_async_ring_destroy. */
+[[nodiscard]] lc_result_ptr lc_async_ring_create(uint32_t queue_size);
 
 /* Destroy the ring and free all resources. */
 void lc_async_ring_destroy(lc_async_ring *ring);
@@ -36,12 +36,12 @@ void lc_async_ring_destroy(lc_async_ring *ring);
 /* Queue a read operation. Does not submit to kernel yet.
  * tag: user-defined value returned in the completion result.
  * offset: file offset (-1 for current position). */
-bool lc_async_submit_read(lc_async_ring *ring, int32_t fd,
+[[nodiscard]] lc_result lc_async_submit_read(lc_async_ring *ring, int32_t fd,
                           void *buf, uint32_t count,
                           uint64_t offset, uint64_t tag);
 
 /* Queue a write operation. Does not submit to kernel yet. */
-bool lc_async_submit_write(lc_async_ring *ring, int32_t fd,
+[[nodiscard]] lc_result lc_async_submit_write(lc_async_ring *ring, int32_t fd,
                            const void *buf, uint32_t count,
                            uint64_t offset, uint64_t tag);
 
@@ -64,7 +64,7 @@ uint32_t lc_async_get_free_slots(const lc_async_ring *ring);
 
 /* Submit a raw SQE with explicit opcode and parameters.
  * Used by lightio for accept, timeout, and other operations. */
-bool lc_async_submit_raw(lc_async_ring *ring, uint8_t opcode, int32_t fd,
+[[nodiscard]] lc_result lc_async_submit_raw(lc_async_ring *ring, uint8_t opcode, int32_t fd,
                          uint64_t addr, uint32_t len, uint64_t offset,
                          uint32_t op_flags, uint64_t tag);
 

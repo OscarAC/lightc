@@ -128,8 +128,9 @@ static void test_arena_destroy(void) {
 /* ===== lc_allocate_pages / lc_free_pages ===== */
 
 static void test_allocate_free_pages(void) {
-    void *pages = lc_allocate_pages(2);
-    TEST_ASSERT_NOT_NULL(pages);
+    lc_result_ptr r = lc_allocate_pages(2);
+    TEST_ASSERT_PTR_OK(r);
+    void *pages = r.value;
 
     /* Write and read data across both pages */
     uint8_t *bytes = (uint8_t *)pages;

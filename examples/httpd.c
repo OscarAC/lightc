@@ -391,7 +391,7 @@ static void handle_request(lc_async_ring *ring, int32_t slot, int32_t bytes_read
 
     /* Submit async write for the response */
     lc_spinlock_acquire(&ring_lock);
-    lc_async_submit_write(ring, conn->fd,
+    (void)lc_async_submit_write(ring, conn->fd,
                           conn->response, (uint32_t)conn->response_len,
                           (uint64_t)-1,
                           MAKE_TAG(slot, OP_WRITE));
@@ -439,10 +439,11 @@ static int32_t accept_thread_func(void *arg) {
     while (atomic_load(&server_running)) {
         /* Blocking accept — waits for a new connection */
         lc_socket_address client_addr;
-        int32_t client_fd = lc_socket_accept(server_fd, &client_addr);
-        if (client_fd < 0) {
+        lc_result r = lc_socket_accept(server_fd, &client_addr);
+        if (lc_is_err(r)) {
             continue;  /* accept error — try again */
         }
+        int32_t client_fd = (int32_t)r.value;
 
         /* Allocate a connection slot */
         int32_t slot = connection_allocate(client_fd);
@@ -455,7 +456,7 @@ static int32_t accept_thread_func(void *arg) {
 
         /* Submit async read for the HTTP request */
         lc_spinlock_acquire(&ring_lock);
-        lc_async_submit_read(ring, client_fd,
+        (void)lc_async_submit_read(ring, client_fd,
                              connections[slot].request, REQUEST_BUF_SIZE,
                              (uint64_t)-1,
                              MAKE_TAG(slot, OP_READ));
@@ -491,19 +492,21 @@ int main(int argc, char **argv, char **envp) {
     }
 
     /* Create io_uring ring */
-    lc_async_ring *ring = lc_async_ring_create(RING_QUEUE_SIZE);
-    if (ring == NULL) {
+    lc_result_ptr ring_r = lc_async_ring_create(RING_QUEUE_SIZE);
+    if (lc_ptr_is_err(ring_r)) {
         lc_print_line(STDERR, S("httpd: failed to create io_uring ring"));
         return 1;
     }
+    lc_async_ring *ring = ring_r.value;
 
     /* Create and bind server socket */
-    int32_t server_fd = lc_socket_listen_on(port, 128);
-    if (server_fd < 0) {
+    lc_result r = lc_socket_listen_on(port, 128);
+    if (lc_is_err(r)) {
         lc_print_line(STDERR, S("httpd: failed to bind server socket"));
         lc_async_ring_destroy(ring);
         return 1;
     }
+    int32_t server_fd = (int32_t)r.value;
 
     /* Print startup message */
     lc_print_string(STDOUT, S("[httpd] lightc httpd listening on port "));
@@ -514,7 +517,7 @@ int main(int argc, char **argv, char **envp) {
     /* Start the accept thread */
     accept_thread_arg thread_arg = { .server_fd = server_fd, .ring = ring };
     lc_thread accept_thread;
-    if (!lc_thread_create(&accept_thread, accept_thread_func, &thread_arg)) {
+    if (lc_is_err(lc_thread_create(&accept_thread, accept_thread_func, &thread_arg))) {
         lc_print_line(STDERR, S("httpd: failed to create accept thread"));
         lc_socket_close(server_fd);
         lc_async_ring_destroy(ring);

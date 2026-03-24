@@ -78,53 +78,53 @@ lc_socket_address lc_socket_address_any(uint16_t port);
 
 /* --- Socket operations --- */
 
-/* Create a socket. Returns fd on success, negative on error. */
-int32_t lc_socket_create(int32_t type);
+/* Create a socket. value = fd on success. */
+[[nodiscard]] lc_result lc_socket_create(int32_t type);
 
 /* Close a socket. */
 void lc_socket_close(int32_t socket_fd);
 
 /* Set socket option to reuse address. */
-bool lc_socket_set_reuse_address(int32_t socket_fd);
+[[nodiscard]] lc_result lc_socket_set_reuse_address(int32_t socket_fd);
 
 /* Bind socket to an address. */
-bool lc_socket_bind(int32_t socket_fd, const lc_socket_address *addr);
+[[nodiscard]] lc_result lc_socket_bind(int32_t socket_fd, const lc_socket_address *addr);
 
 /* Start listening for connections (TCP). */
-bool lc_socket_listen(int32_t socket_fd, int32_t backlog);
+[[nodiscard]] lc_result lc_socket_listen(int32_t socket_fd, int32_t backlog);
 
-/* Accept a connection (TCP). Returns new fd, fills client_addr if non-NULL. */
-int32_t lc_socket_accept(int32_t socket_fd, lc_socket_address *client_addr);
+/* Accept a connection (TCP). value = new fd, fills client_addr if non-NULL. */
+[[nodiscard]] lc_result lc_socket_accept(int32_t socket_fd, lc_socket_address *client_addr);
 
 /* Connect to a remote address (TCP client). */
-bool lc_socket_connect(int32_t socket_fd, const lc_socket_address *addr);
+[[nodiscard]] lc_result lc_socket_connect(int32_t socket_fd, const lc_socket_address *addr);
 
-/* Send data on a connected socket. Returns bytes sent or negative error. */
-int64_t lc_socket_send(int32_t socket_fd, const void *buf, size_t count);
+/* Send data on a connected socket. value = bytes sent. */
+[[nodiscard]] lc_result lc_socket_send(int32_t socket_fd, const void *buf, size_t count);
 
-/* Receive data from a connected socket. Returns bytes received, 0 on close, negative on error. */
-int64_t lc_socket_receive(int32_t socket_fd, void *buf, size_t count);
+/* Receive data from a connected socket. value = bytes received (0 on close). */
+[[nodiscard]] lc_result lc_socket_receive(int32_t socket_fd, void *buf, size_t count);
 
-/* Send data to a specific address (UDP). */
-int64_t lc_socket_send_to(int32_t socket_fd, const void *buf, size_t count,
+/* Send data to a specific address (UDP). value = bytes sent. */
+[[nodiscard]] lc_result lc_socket_send_to(int32_t socket_fd, const void *buf, size_t count,
                           const lc_socket_address *dest);
 
-/* Receive data and get sender's address (UDP). */
-int64_t lc_socket_receive_from(int32_t socket_fd, void *buf, size_t count,
+/* Receive data and get sender's address (UDP). value = bytes received. */
+[[nodiscard]] lc_result lc_socket_receive_from(int32_t socket_fd, void *buf, size_t count,
                                lc_socket_address *sender);
 
 /* Shutdown part of a connection. */
-bool lc_socket_shutdown(int32_t socket_fd, int32_t how);
+[[nodiscard]] lc_result lc_socket_shutdown(int32_t socket_fd, int32_t how);
 
 /* --- Convenience: TCP server --- */
 
-/* Create, bind, listen in one call. Returns socket fd or negative error. */
-int32_t lc_socket_listen_on(uint16_t port, int32_t backlog);
+/* Create, bind, listen in one call. value = socket fd. */
+[[nodiscard]] lc_result lc_socket_listen_on(uint16_t port, int32_t backlog);
 
 /* --- Convenience: TCP client --- */
 
-/* Create and connect in one call. Returns socket fd or negative error. */
-int32_t lc_socket_connect_to(uint8_t a, uint8_t b, uint8_t c, uint8_t d, uint16_t port);
+/* Create and connect in one call. value = socket fd. */
+[[nodiscard]] lc_result lc_socket_connect_to(uint8_t a, uint8_t b, uint8_t c, uint8_t d, uint16_t port);
 
 /* ------------------------------------------------------------------ */
 /* IPv6                                                               */
@@ -142,8 +142,8 @@ typedef struct {
 } lc_socket_address6;
 
 /* Create IPv6 sockets */
-int32_t lc_socket_tcp6(void);
-int32_t lc_socket_udp6(void);
+[[nodiscard]] lc_result lc_socket_tcp6(void);
+[[nodiscard]] lc_result lc_socket_udp6(void);
 
 /* Create an IPv6 address from components */
 lc_socket_address6 lc_socket_address6_create(const uint8_t addr[16], uint16_t port);
@@ -154,12 +154,10 @@ lc_socket_address6 lc_socket_address6_loopback(uint16_t port);
 /* Create any-address (::) */
 lc_socket_address6 lc_socket_address6_any(uint16_t port);
 
-/* Bind/connect/listen/accept work with IPv6 addresses via casting:
- * The existing lc_socket_bind etc. take void* internally (they pass to syscall),
- * so they work with both address types. But for type safety, provide IPv6 variants: */
-bool lc_socket_bind6(int32_t fd, const lc_socket_address6 *addr);
-bool lc_socket_listen6(int32_t fd, int32_t backlog);
-int32_t lc_socket_accept6(int32_t fd, lc_socket_address6 *client_addr);
-bool lc_socket_connect6(int32_t fd, const lc_socket_address6 *addr);
+/* IPv6 type-safe wrappers */
+[[nodiscard]] lc_result lc_socket_bind6(int32_t fd, const lc_socket_address6 *addr);
+[[nodiscard]] lc_result lc_socket_listen6(int32_t fd, int32_t backlog);
+[[nodiscard]] lc_result lc_socket_accept6(int32_t fd, lc_socket_address6 *client_addr);
+[[nodiscard]] lc_result lc_socket_connect6(int32_t fd, const lc_socket_address6 *addr);
 
 #endif /* LIGHTC_SOCKET_H */

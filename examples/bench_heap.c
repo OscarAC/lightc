@@ -33,14 +33,15 @@ static void bench_alloc_free(const char *label, size_t label_len, size_t size) {
 
     /* Warm up */
     for (int i = 0; i < 1000; i++) {
-        void *p = lc_heap_allocate(size);
-        lc_heap_free(p);
+        lc_result_ptr rp = lc_heap_allocate(size);
+        lc_heap_free(rp.value);
     }
 
     /* Measure alloc+free pairs */
     uint64_t start = rdtsc();
     for (int i = 0; i < ITERS; i++) {
-        void *p = lc_heap_allocate(size);
+        lc_result_ptr rp = lc_heap_allocate(size);
+        void *p = rp.value;
         *(volatile char *)p = 0; /* prevent optimization */
         lc_heap_free(p);
     }
@@ -56,7 +57,7 @@ static void bench_batch(const char *label, size_t label_len, size_t size) {
     void *ptrs[BATCH_SIZE];
 
     /* Warm up */
-    for (int i = 0; i < BATCH_SIZE; i++) ptrs[i] = lc_heap_allocate(size);
+    for (int i = 0; i < BATCH_SIZE; i++) ptrs[i] = lc_heap_allocate(size).value;
     for (int i = 0; i < BATCH_SIZE; i++) lc_heap_free(ptrs[i]);
 
     /* Measure: allocate a batch, then free the batch */
@@ -64,7 +65,7 @@ static void bench_batch(const char *label, size_t label_len, size_t size) {
     uint64_t start = rdtsc();
     for (int r = 0; r < rounds; r++) {
         for (int i = 0; i < BATCH_SIZE; i++)
-            ptrs[i] = lc_heap_allocate(size);
+            ptrs[i] = lc_heap_allocate(size).value;
         for (int i = 0; i < BATCH_SIZE; i++)
             lc_heap_free(ptrs[i]);
     }
@@ -84,14 +85,14 @@ static void bench_mixed(void) {
     int nsizes = sizeof(sizes) / sizeof(sizes[0]);
 
     /* Warm up */
-    for (int i = 0; i < BATCH_SIZE; i++) ptrs[i] = lc_heap_allocate(sizes[i % nsizes]);
+    for (int i = 0; i < BATCH_SIZE; i++) ptrs[i] = lc_heap_allocate(sizes[i % nsizes]).value;
     for (int i = 0; i < BATCH_SIZE; i++) lc_heap_free(ptrs[i]);
 
     int rounds = ITERS / BATCH_SIZE;
     uint64_t start = rdtsc();
     for (int r = 0; r < rounds; r++) {
         for (int i = 0; i < BATCH_SIZE; i++)
-            ptrs[i] = lc_heap_allocate(sizes[i % nsizes]);
+            ptrs[i] = lc_heap_allocate(sizes[i % nsizes]).value;
         for (int i = 0; i < BATCH_SIZE; i++)
             lc_heap_free(ptrs[i]);
     }
@@ -117,7 +118,7 @@ static int32_t thread_bench(void *arg) {
     uint64_t start = rdtsc();
     for (int r = 0; r < rounds; r++) {
         for (int i = 0; i < BATCH_SIZE; i++)
-            ptrs[i] = lc_heap_allocate(64);
+            ptrs[i] = lc_heap_allocate(64).value;
         for (int i = 0; i < BATCH_SIZE; i++)
             lc_heap_free(ptrs[i]);
     }
@@ -137,7 +138,7 @@ static void bench_threaded(int nthreads) {
     bench_result results[8];
 
     for (int i = 0; i < nthreads; i++)
-        lc_thread_create(&threads[i], thread_bench, &results[i]);
+        (void)lc_thread_create(&threads[i], thread_bench, &results[i]);
     for (int i = 0; i < nthreads; i++)
         lc_thread_join(&threads[i]);
 

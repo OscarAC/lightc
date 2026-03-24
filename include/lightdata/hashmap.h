@@ -30,8 +30,8 @@ typedef struct {
 lc_hashmap lc_hashmap_create(void);
 void lc_hashmap_destroy(lc_hashmap *map);
 
-/* Set a key-value pair. Overwrites if key exists. Returns true on success. */
-bool lc_hashmap_set(lc_hashmap *map, const char *key, void *value);
+/* Set a key-value pair. Overwrites if key exists. */
+[[nodiscard]] lc_result lc_hashmap_set(lc_hashmap *map, const char *key, void *value);
 
 /* Get value by key. Returns NULL if not found. */
 void *lc_hashmap_get(const lc_hashmap *map, const char *key);

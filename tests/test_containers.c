@@ -24,8 +24,8 @@ static void test_array_create(void) {
 static void test_array_push_and_get(void) {
     lc_array arr = lc_array_create(sizeof(int32_t));
     int32_t val = 42;
-    void *ptr = lc_array_push(&arr, &val);
-    TEST_ASSERT_NOT_NULL(ptr);
+    lc_result_ptr pr = lc_array_push(&arr, &val);
+    TEST_ASSERT_PTR_OK(pr);
     TEST_ASSERT_EQ(lc_array_count(&arr), 1);
     TEST_ASSERT(!lc_array_is_empty(&arr));
 
@@ -37,7 +37,7 @@ static void test_array_push_and_get(void) {
 static void test_array_push_multiple(void) {
     lc_array arr = lc_array_create(sizeof(int32_t));
     for (int32_t i = 0; i < 100; i++) {
-        lc_array_push(&arr, &i);
+        (void)lc_array_push(&arr, &i);
     }
     TEST_ASSERT_EQ(lc_array_count(&arr), 100);
 
@@ -51,7 +51,7 @@ static void test_array_push_multiple(void) {
 static void test_array_pop(void) {
     lc_array arr = lc_array_create(sizeof(int32_t));
     int32_t val = 99;
-    lc_array_push(&arr, &val);
+    (void)lc_array_push(&arr, &val);
 
     int32_t out = 0;
     bool ok = lc_array_pop(&arr, &out);
@@ -72,9 +72,9 @@ static void test_array_pop_empty(void) {
 static void test_array_clear(void) {
     lc_array arr = lc_array_create(sizeof(int32_t));
     int32_t val = 1;
-    lc_array_push(&arr, &val);
-    lc_array_push(&arr, &val);
-    lc_array_push(&arr, &val);
+    (void)lc_array_push(&arr, &val);
+    (void)lc_array_push(&arr, &val);
+    (void)lc_array_push(&arr, &val);
     TEST_ASSERT_EQ(lc_array_count(&arr), 3);
 
     lc_array_clear(&arr);
@@ -86,12 +86,12 @@ static void test_array_clear(void) {
 static void test_array_insert(void) {
     lc_array arr = lc_array_create(sizeof(int32_t));
     int32_t vals[] = {10, 20, 30};
-    lc_array_push(&arr, &vals[0]);
-    lc_array_push(&arr, &vals[2]);
+    (void)lc_array_push(&arr, &vals[0]);
+    (void)lc_array_push(&arr, &vals[2]);
 
     /* Insert 20 at index 1 */
-    void *ptr = lc_array_insert(&arr, 1, &vals[1]);
-    TEST_ASSERT_NOT_NULL(ptr);
+    lc_result_ptr pr = lc_array_insert(&arr, 1, &vals[1]);
+    TEST_ASSERT_PTR_OK(pr);
     TEST_ASSERT_EQ(lc_array_count(&arr), 3);
 
     TEST_ASSERT_EQ(*(int32_t *)lc_array_get(&arr, 0), 10);
@@ -103,7 +103,7 @@ static void test_array_insert(void) {
 static void test_array_remove(void) {
     lc_array arr = lc_array_create(sizeof(int32_t));
     int32_t vals[] = {10, 20, 30};
-    for (int i = 0; i < 3; i++) lc_array_push(&arr, &vals[i]);
+    for (int i = 0; i < 3; i++) (void)lc_array_push(&arr, &vals[i]);
 
     lc_array_remove(&arr, 1); /* remove 20 */
     TEST_ASSERT_EQ(lc_array_count(&arr), 2);
@@ -114,11 +114,10 @@ static void test_array_remove(void) {
 
 static void test_array_reserve(void) {
     lc_array arr = lc_array_create(sizeof(int32_t));
-    bool ok = lc_array_reserve(&arr, 1024);
-    TEST_ASSERT(ok);
+    TEST_ASSERT_OK(lc_array_reserve(&arr, 1024));
     /* Should be able to push without reallocation */
     for (int32_t i = 0; i < 1024; i++) {
-        lc_array_push(&arr, &i);
+        (void)lc_array_push(&arr, &i);
     }
     TEST_ASSERT_EQ(lc_array_count(&arr), 1024);
     lc_array_destroy(&arr);
@@ -127,7 +126,7 @@ static void test_array_reserve(void) {
 static void test_array_destroy(void) {
     lc_array arr = lc_array_create(sizeof(int32_t));
     int32_t val = 1;
-    lc_array_push(&arr, &val);
+    (void)lc_array_push(&arr, &val);
     lc_array_destroy(&arr);
     TEST_ASSERT_EQ(lc_array_count(&arr), 0);
     TEST_ASSERT_NULL(lc_array_data(&arr));
@@ -145,8 +144,7 @@ static void test_hashmap_create(void) {
 
 static void test_hashmap_set_and_get(void) {
     lc_hashmap map = lc_hashmap_create();
-    bool ok = lc_hashmap_set(&map, "key1", (void *)100);
-    TEST_ASSERT(ok);
+    TEST_ASSERT_OK(lc_hashmap_set(&map, "key1", (void *)100));
     TEST_ASSERT_EQ(lc_hashmap_count(&map), 1);
 
     void *val = lc_hashmap_get(&map, "key1");
@@ -163,8 +161,8 @@ static void test_hashmap_get_missing(void) {
 
 static void test_hashmap_overwrite(void) {
     lc_hashmap map = lc_hashmap_create();
-    lc_hashmap_set(&map, "key", (void *)1);
-    lc_hashmap_set(&map, "key", (void *)2);
+    (void)lc_hashmap_set(&map, "key", (void *)1);
+    (void)lc_hashmap_set(&map, "key", (void *)2);
     TEST_ASSERT_EQ(lc_hashmap_count(&map), 1);
     TEST_ASSERT_EQ((uintptr_t)lc_hashmap_get(&map, "key"), 2);
     lc_hashmap_destroy(&map);
@@ -172,7 +170,7 @@ static void test_hashmap_overwrite(void) {
 
 static void test_hashmap_remove(void) {
     lc_hashmap map = lc_hashmap_create();
-    lc_hashmap_set(&map, "key", (void *)42);
+    (void)lc_hashmap_set(&map, "key", (void *)42);
     void *removed = lc_hashmap_remove(&map, "key");
     TEST_ASSERT_EQ((uintptr_t)removed, 42);
     TEST_ASSERT_EQ(lc_hashmap_count(&map), 0);
@@ -189,7 +187,7 @@ static void test_hashmap_remove_missing(void) {
 
 static void test_hashmap_contains(void) {
     lc_hashmap map = lc_hashmap_create();
-    lc_hashmap_set(&map, "present", (void *)1);
+    (void)lc_hashmap_set(&map, "present", (void *)1);
     TEST_ASSERT(lc_hashmap_contains(&map, "present"));
     TEST_ASSERT(!lc_hashmap_contains(&map, "absent"));
     lc_hashmap_destroy(&map);
@@ -198,9 +196,9 @@ static void test_hashmap_contains(void) {
 static void test_hashmap_count(void) {
     lc_hashmap map = lc_hashmap_create();
     TEST_ASSERT_EQ(lc_hashmap_count(&map), 0);
-    lc_hashmap_set(&map, "a", (void *)1);
+    (void)lc_hashmap_set(&map, "a", (void *)1);
     TEST_ASSERT_EQ(lc_hashmap_count(&map), 1);
-    lc_hashmap_set(&map, "b", (void *)2);
+    (void)lc_hashmap_set(&map, "b", (void *)2);
     TEST_ASSERT_EQ(lc_hashmap_count(&map), 2);
     lc_hashmap_remove(&map, "a");
     TEST_ASSERT_EQ(lc_hashmap_count(&map), 1);
@@ -217,9 +215,9 @@ static bool _iterate_sum_cb(const char *key, void *value, void *user_data) {
 
 static void test_hashmap_iterate(void) {
     lc_hashmap map = lc_hashmap_create();
-    lc_hashmap_set(&map, "a", (void *)10);
-    lc_hashmap_set(&map, "b", (void *)20);
-    lc_hashmap_set(&map, "c", (void *)30);
+    (void)lc_hashmap_set(&map, "a", (void *)10);
+    (void)lc_hashmap_set(&map, "b", (void *)20);
+    (void)lc_hashmap_set(&map, "c", (void *)30);
 
     uintptr_t sum = 0;
     lc_hashmap_iterate(&map, _iterate_sum_cb, &sum);
@@ -241,8 +239,7 @@ static void test_hashmap_many_keys(void) {
         lc_format_add_unsigned_padded(&fmt, i, 3, '0');
         lc_format_finish(&fmt);
 
-        bool ok = lc_hashmap_set(&map, keybuf, (void *)i);
-        TEST_ASSERT(ok);
+        TEST_ASSERT_OK(lc_hashmap_set(&map, keybuf, (void *)i));
     }
     TEST_ASSERT_EQ(lc_hashmap_count(&map), 200);
 
@@ -262,8 +259,8 @@ static void test_hashmap_many_keys(void) {
 
 static void test_hashmap_destroy(void) {
     lc_hashmap map = lc_hashmap_create();
-    lc_hashmap_set(&map, "x", (void *)1);
-    lc_hashmap_set(&map, "y", (void *)2);
+    (void)lc_hashmap_set(&map, "x", (void *)1);
+    (void)lc_hashmap_set(&map, "y", (void *)2);
     lc_hashmap_destroy(&map);
     TEST_ASSERT_EQ(lc_hashmap_count(&map), 0);
 }
@@ -283,12 +280,11 @@ static void test_ringbuf_create(void) {
 static void test_ringbuf_push_pop(void) {
     lc_ringbuf ring = lc_ringbuf_create(sizeof(int32_t), 8);
     int32_t val = 42;
-    bool ok = lc_ringbuf_push(&ring, &val);
-    TEST_ASSERT(ok);
+    TEST_ASSERT_OK(lc_ringbuf_push(&ring, &val));
     TEST_ASSERT_EQ(lc_ringbuf_count(&ring), 1);
 
     int32_t out = 0;
-    ok = lc_ringbuf_pop(&ring, &out);
+    bool ok = lc_ringbuf_pop(&ring, &out);
     TEST_ASSERT(ok);
     TEST_ASSERT_EQ(out, 42);
     TEST_ASSERT_EQ(lc_ringbuf_count(&ring), 0);
@@ -298,7 +294,7 @@ static void test_ringbuf_push_pop(void) {
 static void test_ringbuf_peek(void) {
     lc_ringbuf ring = lc_ringbuf_create(sizeof(int32_t), 8);
     int32_t val = 77;
-    lc_ringbuf_push(&ring, &val);
+    (void)lc_ringbuf_push(&ring, &val);
 
     int32_t *peeked = lc_ringbuf_peek(&ring);
     TEST_ASSERT_NOT_NULL(peeked);
@@ -326,15 +322,13 @@ static void test_ringbuf_full(void) {
     lc_ringbuf ring = lc_ringbuf_create(sizeof(int32_t), 4);
     /* Capacity is next power of 2, so 4 */
     for (int32_t i = 0; i < 4; i++) {
-        bool ok = lc_ringbuf_push(&ring, &i);
-        TEST_ASSERT(ok);
+        TEST_ASSERT_OK(lc_ringbuf_push(&ring, &i));
     }
     TEST_ASSERT(lc_ringbuf_is_full(&ring));
 
     /* Push should fail when full */
     int32_t extra = 99;
-    bool ok = lc_ringbuf_push(&ring, &extra);
-    TEST_ASSERT(!ok);
+    TEST_ASSERT_ERR(lc_ringbuf_push(&ring, &extra));
     lc_ringbuf_destroy(&ring);
 }
 
@@ -347,7 +341,7 @@ static void test_ringbuf_wraparound(void) {
 
     /* Push 4 elements: 0, 1, 2, 3 */
     for (int32_t i = 0; i < 4; i++) {
-        lc_ringbuf_push(&ring, &i);
+        (void)lc_ringbuf_push(&ring, &i);
     }
 
     /* Pop 2 elements: should get 0, 1 */
@@ -359,10 +353,8 @@ static void test_ringbuf_wraparound(void) {
 
     /* Now count=2, push 2 more: 10, 11 (these wrap around) */
     int32_t v10 = 10, v11 = 11;
-    bool ok1 = lc_ringbuf_push(&ring, &v10);
-    bool ok2 = lc_ringbuf_push(&ring, &v11);
-    TEST_ASSERT(ok1);
-    TEST_ASSERT(ok2);
+    TEST_ASSERT_OK(lc_ringbuf_push(&ring, &v10));
+    TEST_ASSERT_OK(lc_ringbuf_push(&ring, &v11));
     TEST_ASSERT_EQ(lc_ringbuf_count(&ring), 4);
 
     /* Pop all: should get 2, 3, 10, 11 */
@@ -382,8 +374,8 @@ static void test_ringbuf_wraparound(void) {
 static void test_ringbuf_clear(void) {
     lc_ringbuf ring = lc_ringbuf_create(sizeof(int32_t), 8);
     int32_t val = 1;
-    lc_ringbuf_push(&ring, &val);
-    lc_ringbuf_push(&ring, &val);
+    (void)lc_ringbuf_push(&ring, &val);
+    (void)lc_ringbuf_push(&ring, &val);
     lc_ringbuf_clear(&ring);
     TEST_ASSERT(lc_ringbuf_is_empty(&ring));
     TEST_ASSERT_EQ(lc_ringbuf_count(&ring), 0);
@@ -393,7 +385,7 @@ static void test_ringbuf_clear(void) {
 static void test_ringbuf_destroy(void) {
     lc_ringbuf ring = lc_ringbuf_create(sizeof(int32_t), 8);
     int32_t val = 5;
-    lc_ringbuf_push(&ring, &val);
+    (void)lc_ringbuf_push(&ring, &val);
     lc_ringbuf_destroy(&ring);
     TEST_ASSERT_NULL(ring.data);
 }
@@ -401,7 +393,7 @@ static void test_ringbuf_destroy(void) {
 static void test_ringbuf_fifo_order(void) {
     lc_ringbuf ring = lc_ringbuf_create(sizeof(int32_t), 16);
     for (int32_t i = 0; i < 10; i++) {
-        lc_ringbuf_push(&ring, &i);
+        (void)lc_ringbuf_push(&ring, &i);
     }
     for (int32_t i = 0; i < 10; i++) {
         int32_t out;

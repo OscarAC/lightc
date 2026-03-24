@@ -261,6 +261,73 @@ static void test_format_repeat(void) {
     TEST_ASSERT_STR_EQ(buf, 5, "=====", 5);
 }
 
+/* ===== lc_format_add_double ===== */
+
+static void test_format_double_zero(void) {
+    char buf[64];
+    lc_format fmt = lc_format_start(buf, sizeof(buf));
+    lc_format_add_double(&fmt, 0.0);
+    size_t len = lc_format_finish(&fmt);
+    TEST_ASSERT_STR_EQ(buf, len, "0.000000", 8);
+}
+
+static void test_format_double_positive(void) {
+    char buf[64];
+    lc_format fmt = lc_format_start(buf, sizeof(buf));
+    lc_format_add_double(&fmt, 1.5);
+    size_t len = lc_format_finish(&fmt);
+    TEST_ASSERT_STR_EQ(buf, len, "1.500000", 8);
+}
+
+static void test_format_double_negative(void) {
+    char buf[64];
+    lc_format fmt = lc_format_start(buf, sizeof(buf));
+    lc_format_add_double(&fmt, -3.14);
+    size_t len = lc_format_finish(&fmt);
+    /* -3.14 -> "-3.140000" */
+    TEST_ASSERT_STR_EQ(buf, len, "-3.140000", 9);
+}
+
+static void test_format_double_nan(void) {
+    char buf[64];
+    lc_format fmt = lc_format_start(buf, sizeof(buf));
+    lc_format_add_double(&fmt, __builtin_nan(""));
+    size_t len = lc_format_finish(&fmt);
+    TEST_ASSERT_STR_EQ(buf, len, "nan", 3);
+}
+
+static void test_format_double_inf(void) {
+    char buf[64];
+    lc_format fmt = lc_format_start(buf, sizeof(buf));
+    lc_format_add_double(&fmt, __builtin_inf());
+    size_t len = lc_format_finish(&fmt);
+    TEST_ASSERT_STR_EQ(buf, len, "inf", 3);
+}
+
+static void test_format_double_neg_inf(void) {
+    char buf[64];
+    lc_format fmt = lc_format_start(buf, sizeof(buf));
+    lc_format_add_double(&fmt, -__builtin_inf());
+    size_t len = lc_format_finish(&fmt);
+    TEST_ASSERT_STR_EQ(buf, len, "-inf", 4);
+}
+
+static void test_format_double_precision(void) {
+    char buf[64];
+    lc_format fmt = lc_format_start(buf, sizeof(buf));
+    lc_format_add_double_precision(&fmt, 3.14159, 2);
+    size_t len = lc_format_finish(&fmt);
+    TEST_ASSERT_STR_EQ(buf, len, "3.14", 4);
+}
+
+static void test_format_double_neg_zero(void) {
+    char buf[64];
+    lc_format fmt = lc_format_start(buf, sizeof(buf));
+    lc_format_add_double(&fmt, -0.0);
+    size_t len = lc_format_finish(&fmt);
+    TEST_ASSERT_STR_EQ(buf, len, "-0.000000", 9);
+}
+
 /* ===== main ===== */
 
 int main(int argc, char **argv, char **envp) {
@@ -310,6 +377,16 @@ int main(int argc, char **argv, char **envp) {
     /* newline / repeat */
     TEST_RUN(test_format_newline);
     TEST_RUN(test_format_repeat);
+
+    /* add_double */
+    TEST_RUN(test_format_double_zero);
+    TEST_RUN(test_format_double_positive);
+    TEST_RUN(test_format_double_negative);
+    TEST_RUN(test_format_double_nan);
+    TEST_RUN(test_format_double_inf);
+    TEST_RUN(test_format_double_neg_inf);
+    TEST_RUN(test_format_double_precision);
+    TEST_RUN(test_format_double_neg_zero);
 
     return test_main();
 }

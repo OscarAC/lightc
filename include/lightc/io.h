@@ -97,15 +97,15 @@ bool lc_reader_is_end(const lc_reader *reader);
 
 /* Read an entire file into a heap-allocated buffer.
  * Caller must lc_heap_free(*out_data) when done.
- * Returns true on success, false on error. */
-bool lc_file_read_all(const char *path, uint8_t **out_data, size_t *out_size);
+ * value = bytes read on success. */
+[[nodiscard]] lc_result lc_file_read_all(const char *path, uint8_t **out_data, size_t *out_size);
 
 /* Write a buffer to a file (creates or truncates).
- * Returns true on success, false on error. */
-bool lc_file_write_all(const char *path, const void *data, size_t size);
+ * value = bytes written on success. */
+[[nodiscard]] lc_result lc_file_write_all(const char *path, const void *data, size_t size);
 
-/* Get the size of a file in bytes. Returns -1 on error. */
-int64_t lc_file_get_size(const char *path);
+/* Get the size of a file in bytes. value = size on success. */
+[[nodiscard]] lc_result lc_file_get_size(const char *path);
 
 /* ========================================================================
  * Directory Listing
@@ -130,8 +130,8 @@ typedef struct {
     uint8_t     type;   /* LC_DT_REG, LC_DT_DIR, etc. */
 } lc_directory_entry;
 
-/* Open a directory for listing. Returns true on success. */
-bool lc_directory_open(lc_directory *dir, const char *path);
+/* Open a directory for listing. */
+[[nodiscard]] lc_result lc_directory_open(lc_directory *dir, const char *path);
 
 /* Get the next entry. Returns true if an entry was read, false when done. */
 bool lc_directory_next(lc_directory *dir, lc_directory_entry *entry);

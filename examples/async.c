@@ -35,8 +35,9 @@ int main(int argc, char **argv, char **envp) {
      * ================================================================ */
 
     lc_print_string(STDOUT, S("ring_create"));
-    lc_async_ring *ring = lc_async_ring_create(8);
-    ok = ring != NULL;
+    lc_result_ptr ring_r = lc_async_ring_create(8);
+    lc_async_ring *ring = ring_r.value;
+    ok = !lc_ptr_is_err(ring_r);
     say_pass_fail(ok);
     if (!ok) return 1;
 
@@ -57,7 +58,7 @@ int main(int argc, char **argv, char **envp) {
     lc_print_string(STDOUT, S("async_read"));
     const char *read_test_data = "async read works!";
     size_t read_test_len = 17;
-    ok = lc_file_write_all(test_read_file, read_test_data, read_test_len);
+    ok = lc_is_ok(lc_file_write_all(test_read_file, read_test_data, read_test_len));
     if (!ok) { say_pass_fail(false); return 1; }
 
     lc_sysret fd_ret = lc_kernel_open_file(test_read_file, O_RDONLY, 0);
@@ -66,7 +67,7 @@ int main(int argc, char **argv, char **envp) {
 
     char read_buf[64];
     lc_bytes_fill(read_buf, 0, sizeof(read_buf));
-    ok = lc_async_submit_read(ring, read_fd, read_buf, (uint32_t)read_test_len, 0, 100);
+    ok = lc_is_ok(lc_async_submit_read(ring, read_fd, read_buf, (uint32_t)read_test_len, 0, 100));
     if (!ok) { say_pass_fail(false); return 1; }
 
     lc_async_result results[8];
@@ -89,8 +90,8 @@ int main(int argc, char **argv, char **envp) {
 
     const char *write_test_data = "async write works!";
     size_t write_test_len = 18;
-    ok = lc_async_submit_write(ring, write_fd, write_test_data,
-                               (uint32_t)write_test_len, 0, 200);
+    ok = lc_is_ok(lc_async_submit_write(ring, write_fd, write_test_data,
+                               (uint32_t)write_test_len, 0, 200));
     if (!ok) { say_pass_fail(false); return 1; }
 
     completed = lc_async_wait(ring, results, 8);
@@ -103,7 +104,7 @@ int main(int argc, char **argv, char **envp) {
     if (ok) {
         uint8_t *verify_data = NULL;
         size_t verify_size = 0;
-        ok = lc_file_read_all(test_write_file, &verify_data, &verify_size);
+        ok = lc_is_ok(lc_file_read_all(test_write_file, &verify_data, &verify_size));
         ok = ok && verify_size == write_test_len &&
              lc_string_equal((char *)verify_data, verify_size,
                              write_test_data, write_test_len);
@@ -120,7 +121,7 @@ int main(int argc, char **argv, char **envp) {
     /* Write a file with 4 distinct 8-byte chunks */
     const char *batch_data = "AAAAAAA\nBBBBBBB\nCCCCCCC\nDDDDDDD\n";
     size_t batch_data_len = 32;
-    ok = lc_file_write_all(test_batch_file, batch_data, batch_data_len);
+    ok = lc_is_ok(lc_file_write_all(test_batch_file, batch_data, batch_data_len));
     if (!ok) { say_pass_fail(false); return 1; }
 
     fd_ret = lc_kernel_open_file(test_batch_file, O_RDONLY, 0);
@@ -133,10 +134,10 @@ int main(int argc, char **argv, char **envp) {
     lc_bytes_fill(batch_buf2, 0, 8);
     lc_bytes_fill(batch_buf3, 0, 8);
 
-    ok = lc_async_submit_read(ring, batch_fd, batch_buf0, 8, 0, 300);
-    ok = ok && lc_async_submit_read(ring, batch_fd, batch_buf1, 8, 8, 301);
-    ok = ok && lc_async_submit_read(ring, batch_fd, batch_buf2, 8, 16, 302);
-    ok = ok && lc_async_submit_read(ring, batch_fd, batch_buf3, 8, 24, 303);
+    ok = lc_is_ok(lc_async_submit_read(ring, batch_fd, batch_buf0, 8, 0, 300));
+    ok = ok && lc_is_ok(lc_async_submit_read(ring, batch_fd, batch_buf1, 8, 8, 301));
+    ok = ok && lc_is_ok(lc_async_submit_read(ring, batch_fd, batch_buf2, 8, 16, 302));
+    ok = ok && lc_is_ok(lc_async_submit_read(ring, batch_fd, batch_buf3, 8, 24, 303));
     if (!ok) { say_pass_fail(false); return 1; }
 
     /* Wait and collect all completions */
@@ -177,7 +178,7 @@ int main(int argc, char **argv, char **envp) {
      * ================================================================ */
 
     lc_print_string(STDOUT, S("async_peek"));
-    ok = lc_file_write_all(test_peek_file, "peek test!", 10);
+    ok = lc_is_ok(lc_file_write_all(test_peek_file, "peek test!", 10));
     if (!ok) { say_pass_fail(false); return 1; }
 
     fd_ret = lc_kernel_open_file(test_peek_file, O_RDONLY, 0);
@@ -186,7 +187,7 @@ int main(int argc, char **argv, char **envp) {
 
     char peek_buf[16];
     lc_bytes_fill(peek_buf, 0, sizeof(peek_buf));
-    ok = lc_async_submit_read(ring, peek_fd, peek_buf, 10, 0, 400);
+    ok = lc_is_ok(lc_async_submit_read(ring, peek_fd, peek_buf, 10, 0, 400));
     if (!ok) { say_pass_fail(false); return 1; }
 
     /* Flush to kernel so the operation actually runs */
@@ -214,13 +215,13 @@ int main(int argc, char **argv, char **envp) {
     uint32_t initial_free = lc_async_get_free_slots(ring);
 
     /* Write a dummy file for reading */
-    ok = lc_file_write_all(test_read_file, "slots", 5);
+    ok = lc_is_ok(lc_file_write_all(test_read_file, "slots", 5));
     fd_ret = lc_kernel_open_file(test_read_file, O_RDONLY, 0);
     if (fd_ret < 0 || !ok) { say_pass_fail(false); return 1; }
     int32_t slots_fd = (int32_t)fd_ret;
 
     char slots_buf[8];
-    ok = lc_async_submit_read(ring, slots_fd, slots_buf, 5, 0, 500);
+    ok = lc_is_ok(lc_async_submit_read(ring, slots_fd, slots_buf, 5, 0, 500));
     uint32_t after_one = lc_async_get_free_slots(ring);
     ok = ok && (after_one == initial_free - 1);
 
@@ -237,7 +238,7 @@ int main(int argc, char **argv, char **envp) {
     lc_print_string(STDOUT, S("async_sequential_offset"));
     const char *seq_data = "firstsecondthird";
     size_t seq_data_len = 16;
-    ok = lc_file_write_all(test_seq_file, seq_data, seq_data_len);
+    ok = lc_is_ok(lc_file_write_all(test_seq_file, seq_data, seq_data_len));
     if (!ok) { say_pass_fail(false); return 1; }
 
     fd_ret = lc_kernel_open_file(test_seq_file, O_RDONLY, 0);
@@ -247,7 +248,7 @@ int main(int argc, char **argv, char **envp) {
     /* Read "first" (5 bytes) at current position (0) */
     char seq_buf1[8];
     lc_bytes_fill(seq_buf1, 0, sizeof(seq_buf1));
-    ok = lc_async_submit_read(ring, seq_fd, seq_buf1, 5, (uint64_t)-1, 600);
+    ok = lc_is_ok(lc_async_submit_read(ring, seq_fd, seq_buf1, 5, (uint64_t)-1, 600));
     if (!ok) { say_pass_fail(false); return 1; }
     completed = lc_async_wait(ring, results, 8);
     ok = completed == 1 &&
@@ -259,7 +260,7 @@ int main(int argc, char **argv, char **envp) {
     char seq_buf2[8];
     lc_bytes_fill(seq_buf2, 0, sizeof(seq_buf2));
     if (ok) {
-        ok = lc_async_submit_read(ring, seq_fd, seq_buf2, 6, (uint64_t)-1, 601);
+        ok = lc_is_ok(lc_async_submit_read(ring, seq_fd, seq_buf2, 6, (uint64_t)-1, 601));
         if (!ok) { say_pass_fail(false); return 1; }
         completed = lc_async_wait(ring, results, 8);
         ok = completed == 1 &&
@@ -272,7 +273,7 @@ int main(int argc, char **argv, char **envp) {
     char seq_buf3[8];
     lc_bytes_fill(seq_buf3, 0, sizeof(seq_buf3));
     if (ok) {
-        ok = lc_async_submit_read(ring, seq_fd, seq_buf3, 5, (uint64_t)-1, 602);
+        ok = lc_is_ok(lc_async_submit_read(ring, seq_fd, seq_buf3, 5, (uint64_t)-1, 602));
         if (!ok) { say_pass_fail(false); return 1; }
         completed = lc_async_wait(ring, results, 8);
         ok = completed == 1 &&

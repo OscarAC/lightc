@@ -196,13 +196,13 @@ int main(int argc, char **argv, char **envp) {
     lc_print_string(STDOUT, S("file_write_all"));
     const char *test_data = "file_write_all works!\n";
     size_t test_data_len = lc_string_length(test_data);
-    ok = lc_file_write_all(test_file2, test_data, test_data_len);
+    ok = lc_is_ok(lc_file_write_all(test_file2, test_data, test_data_len));
     say_pass_fail(ok);
 
     lc_print_string(STDOUT, S("file_read_all"));
     uint8_t *read_data = NULL;
     size_t read_size = 0;
-    ok = lc_file_read_all(test_file2, &read_data, &read_size);
+    ok = lc_is_ok(lc_file_read_all(test_file2, &read_data, &read_size));
     say_pass_fail(ok && read_size == test_data_len &&
                   lc_string_equal((char *)read_data, read_size, test_data, test_data_len));
     lc_heap_free(read_data);
@@ -212,10 +212,10 @@ int main(int argc, char **argv, char **envp) {
      * ================================================================ */
 
     lc_print_string(STDOUT, S("file_read_all_empty"));
-    ok = lc_file_write_all(test_file2, "", 0);
+    ok = lc_is_ok(lc_file_write_all(test_file2, "", 0));
     uint8_t *empty_data = NULL;
     size_t empty_size = 99;
-    ok = ok && lc_file_read_all(test_file2, &empty_data, &empty_size);
+    ok = ok && lc_is_ok(lc_file_read_all(test_file2, &empty_data, &empty_size));
     say_pass_fail(ok && empty_size == 0);
     lc_heap_free(empty_data);
 
@@ -225,13 +225,13 @@ int main(int argc, char **argv, char **envp) {
 
     lc_print_string(STDOUT, S("file_get_size"));
     /* Write known data */
-    ok = lc_file_write_all(test_file2, "exactly 18 bytes.", 18);
-    int64_t size = lc_file_get_size(test_file2);
-    say_pass_fail(ok && size == 18);
+    ok = lc_is_ok(lc_file_write_all(test_file2, "exactly 18 bytes.", 18));
+    lc_result size_r = lc_file_get_size(test_file2);
+    say_pass_fail(ok && lc_is_ok(size_r));
 
     lc_print_string(STDOUT, S("file_get_size_nonexistent"));
-    size = lc_file_get_size("/tmp/lightc_no_such_file_ever.txt");
-    say_pass_fail(size == -1);
+    lc_result size_r2 = lc_file_get_size("/tmp/lightc_no_such_file_ever.txt");
+    say_pass_fail(lc_is_err(size_r2));
 
     /* ================================================================
      * Directory listing
@@ -239,7 +239,7 @@ int main(int argc, char **argv, char **envp) {
 
     lc_print_string(STDOUT, S("directory_open"));
     lc_directory dir;
-    ok = lc_directory_open(&dir, "/tmp");
+    ok = lc_is_ok(lc_directory_open(&dir, "/tmp"));
     say_pass_fail(ok);
 
     lc_print_string(STDOUT, S("directory_next"));
@@ -269,7 +269,7 @@ int main(int argc, char **argv, char **envp) {
     say_pass_fail(dir.fd == -1);
 
     lc_print_string(STDOUT, S("directory_open_nonexistent"));
-    ok = lc_directory_open(&dir, "/tmp/lightc_no_such_directory_ever");
+    ok = lc_is_ok(lc_directory_open(&dir, "/tmp/lightc_no_such_directory_ever"));
     say_pass_fail(!ok);
 
     /* ================================================================
@@ -288,7 +288,7 @@ int main(int argc, char **argv, char **envp) {
     /* Read it back and verify */
     uint8_t *verify_data = NULL;
     size_t verify_size = 0;
-    ok = lc_file_read_all(test_file2, &verify_data, &verify_size);
+    ok = lc_is_ok(lc_file_read_all(test_file2, &verify_data, &verify_size));
     ok = ok && verify_size == 26 &&
          lc_string_equal((char *)verify_data, verify_size,
                          "abcdefghijklmnopqrstuvwxyz", 26);
@@ -310,7 +310,7 @@ int main(int argc, char **argv, char **envp) {
 
     verify_data = NULL;
     verify_size = 0;
-    ok = lc_file_read_all(test_file2, &verify_data, &verify_size);
+    ok = lc_is_ok(lc_file_read_all(test_file2, &verify_data, &verify_size));
     ok = ok && verify_size == 20 &&
          lc_string_equal((char *)verify_data, verify_size,
                          "-9223372036854775808", 20);
@@ -322,7 +322,7 @@ int main(int argc, char **argv, char **envp) {
      * ================================================================ */
 
     lc_print_string(STDOUT, S("reader_line_truncation"));
-    ok = lc_file_write_all(test_file2, "abcdefghijklmnop\nnext\n", 22);
+    ok = lc_is_ok(lc_file_write_all(test_file2, "abcdefghijklmnop\nnext\n", 22));
     fd_ret = lc_kernel_open_file(test_file2, O_RDONLY, 0);
     fd = (int32_t)fd_ret;
     lc_reader r3 = lc_reader_create(fd, 64);

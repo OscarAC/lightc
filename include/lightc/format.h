@@ -112,4 +112,12 @@ void lc_format_add_string_left(lc_format *fmt, const char *str, size_t length,
 void lc_format_add_string_right(lc_format *fmt, const char *str, size_t length,
                                 uint32_t width, char pad);
 
+/* --- Floating-point --- */
+
+/* Add a double with default precision (6 decimal places). */
+void lc_format_add_double(lc_format *fmt, double value);
+
+/* Add a double with custom precision (decimal places). */
+void lc_format_add_double_precision(lc_format *fmt, double value, uint32_t precision);
+
 #endif /* LIGHTC_FORMAT_H */
