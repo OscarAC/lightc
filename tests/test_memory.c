@@ -145,6 +145,20 @@ static void test_allocate_free_pages(void) {
     lc_free_pages(pages, 2);
 }
 
+/* ===== Page allocation failure ===== */
+
+static void test_allocate_pages_failure(void) {
+    /* Request an impossibly large mapping: 2^50 pages == 2^62 bytes.
+     * The multiplication by LC_PAGE_SIZE does not overflow size_t, so this
+     * reaches mmap, which rejects it with -ENOMEM. The raw syscall returns
+     * -errno (not MAP_FAILED); lc_kernel_map_memory must normalize that error
+     * range to MAP_FAILED so lc_allocate_pages reports LC_ERR_NOMEM cleanly
+     * instead of returning a wild (void *)-ENOMEM pointer. */
+    lc_result_ptr r = lc_allocate_pages((size_t)1 << 50);
+    TEST_ASSERT_PTR_ERR(r);
+    TEST_ASSERT_EQ(r.error, LC_ERR_NOMEM);
+}
+
 /* ===== Arena overflow ===== */
 
 static void test_arena_overflow(void) {
@@ -234,6 +248,9 @@ int main(int argc, char **argv, char **envp) {
 
     /* lc_allocate_pages / lc_free_pages */
     TEST_RUN(test_allocate_free_pages);
+
+    /* Page allocation failure returns a clean error, not a wild pointer */
+    TEST_RUN(test_allocate_pages_failure);
 
     /* Arena overflow */
     TEST_RUN(test_arena_overflow);

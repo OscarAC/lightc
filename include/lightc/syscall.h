@@ -190,8 +190,13 @@ static inline lc_sysret lc_kernel_read_directory(int32_t fd, void *buf, size_t c
 
 static inline void *lc_kernel_map_memory(void *addr, size_t len, int32_t prot, int32_t flags,
                                          int32_t fd, int64_t offset) {
-    return (void *)lc_syscall6(SYS_mmap, (int64_t)addr, (int64_t)len,
-                               prot, flags, fd, offset);
+    /* The raw syscall returns -errno (e.g. -ENOMEM) on failure, not MAP_FAILED.
+     * Any value in [-4095, -1] is an error code; normalize it to MAP_FAILED so
+     * callers can rely on a single `== MAP_FAILED` check. */
+    uintptr_t ret = (uintptr_t)lc_syscall6(SYS_mmap, (int64_t)addr, (int64_t)len,
+                                           prot, flags, fd, offset);
+    if (ret >= (uintptr_t)-4095) return MAP_FAILED;
+    return (void *)ret;
 }
 
 static inline lc_sysret lc_kernel_unmap_memory(void *addr, size_t len) {
