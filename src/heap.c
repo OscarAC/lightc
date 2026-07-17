@@ -290,7 +290,10 @@ static void drain_remote_frees(lc_heap_page *page) {
  *   so %fs:0 gives us the pointer. Before first setup, FS base is 0 and
  *   %fs:0 would segfault, so we set up a null sentinel at program init.
  *
- * aarch64: TPIDR_EL0 register, directly readable (0 before setup = NULL).
+ * aarch64: TPIDR_EL0 holds the lc_heap_local pointer directly. We read its
+ *   ->self field (like x86_64's %fs:0) so the null sentinel — whose address
+ *   is installed in TPIDR_EL0 but whose self = NULL — reports as uninitialized
+ *   rather than being mistaken for a real per-thread heap.
  */
 
 /* Null sentinel: FS/TPIDR points here before a thread sets up TLS.
@@ -304,9 +307,14 @@ static inline lc_heap_local *tls_read(void) {
     __asm__ volatile("movq %%fs:0, %0" : "=r"(local));
     return local;
 #elif defined(__aarch64__)
-    lc_heap_local *local;
-    __asm__ volatile("mrs %0, tpidr_el0" : "=r"(local));
-    return local;
+    /* TPIDR_EL0 holds the lc_heap_local pointer directly. Dereference ->self
+     * so the sentinel (self == NULL) is reported as uninitialized, mirroring
+     * x86_64's %fs:0 read. A zero register (TLS never set) is treated as NULL
+     * too, so this never faults. */
+    lc_heap_local *base;
+    __asm__ volatile("mrs %0, tpidr_el0" : "=r"(base));
+    if (base == NULL) return NULL;
+    return base->self;
 #endif
 }
 

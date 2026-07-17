@@ -28,7 +28,15 @@ lc_thread_start:
 
     /* clone syscall:
      *   x8 = SYS_clone (220)
-     *   x0-x4 already set (flags, stack, parent_tid, child_tid, tls) */
+     *   x0-x2 already set (flags, stack, parent_tid).
+     *
+     * aarch64 selects CONFIG_CLONE_BACKWARDS, so the kernel signature is
+     *   clone(flags, newsp, parent_tidptr, tls, child_tidptr)
+     * i.e. x3 = tls, x4 = child_tid. The C ABI delivers child_tid in x3 and
+     * tls in x4, so swap them before the syscall (x9 is a caller-saved temp). */
+    mov     x9, x3          /* x9 = child_tid */
+    mov     x3, x4          /* x3 = tls       */
+    mov     x4, x9          /* x4 = child_tid */
     mov     x8, #220
     svc     #0
 
