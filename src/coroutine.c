@@ -120,21 +120,27 @@ lc_coroutine *lc_coroutine_create(lc_scheduler *sched, lc_coroutine_func func, v
      */
 #if defined(__x86_64__)
     /*
-     * Stack grows down. The top of the mmap'd region is the initial stack top.
+     * Stack grows down. The top of the mmap'd region is the initial stack top
+     * and is 16-byte aligned (page-aligned from mmap).
      *
      * We place the trampoline address as a "return address" on the stack.
-     * When lc_coroutine_switch executes `ret`, it pops this address and
-     * jumps to the trampoline.
+     * When lc_coroutine_switch executes `ret`, it pops this address (rsp += 8)
+     * and jumps to the trampoline.
      *
-     * After ret: rsp = stack_top (16-byte aligned from mmap).
-     * The trampoline then calls func(arg). At that point rsp is 16-byte
-     * aligned, and `call` pushes 8 bytes, so the callee sees rsp 8-mod-16.
-     * This matches the System V ABI requirement.
+     * The trampoline is a normal function, so it is entered under the System V
+     * ABI invariant: rsp + 8 must be 16-byte aligned at entry (i.e. rsp ≡ 8
+     * mod 16), because the compiler's prologue assumes it. `ret` adds 8, so
+     * context.rsp itself must be 16-byte aligned (≡ 0 mod 16). We therefore
+     * reserve 16 bytes (keeping the aligned stack_top aligned) and store the
+     * return address in the lower slot. Reserving only 8 would leave the
+     * trampoline entered at rsp ≡ 0 mod 16 — misaligned by 8 — which faults
+     * on any aligned SSE spill (movaps) in the coroutine call tree.
      */
     uint64_t *stack_top = (uint64_t *)((uint8_t *)stack + total_size);
 
-    /* Push the trampoline address as the return address */
-    stack_top--;
+    /* Reserve 16 bytes; put the trampoline "return address" in the low slot so
+     * context.rsp stays 16-byte aligned. */
+    stack_top -= 2;
     *stack_top = (uint64_t)coroutine_trampoline;
 
     co->context.rsp = (uint64_t)stack_top;

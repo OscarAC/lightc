@@ -177,6 +177,66 @@ static void test_over_capacity(void) {
     lc_scheduler_destroy(&sched);
 }
 
+/* ===== Stack alignment at coroutine entry ===== */
+
+/*
+ * Regression test for the coroutine entry-stack alignment. Both the System V
+ * AMD64 and AArch64 ABIs require a 16-byte-aligned stack. The trampoline is
+ * entered via a return-address jump; if the initial context stack pointer is
+ * off by 8, the whole coroutine call tree runs misaligned and any aligned SSE
+ * spill (movaps) faults.
+ *
+ * lc_probe_entry_sp() is a *naked* function (no prologue at any optimization
+ * level) that reads the stack pointer as its first instruction, i.e. the value
+ * on entry via `call`/`bl`. The ABI pins that value:
+ *   x86_64  — the caller leaves rsp 16-aligned before `call`, which pushes an
+ *             8-byte return address, so a correctly-aligned frame gives
+ *             rsp & 15 == 8.
+ *   aarch64 — the return address lives in lr (nothing pushed), so a correctly
+ *             aligned frame gives sp & 15 == 0.
+ * A trampoline that mis-set the stack by 8 flips this modulus, so the check
+ * discriminates the bug cleanly without provoking a fault.
+ */
+#if defined(__x86_64__)
+__attribute__((naked, noinline)) static unsigned long lc_probe_entry_sp(void) {
+    __asm__ volatile ("mov %rsp, %rax\n\tret");
+}
+#define LC_ENTRY_SP_MOD 8u
+#elif defined(__aarch64__)
+__attribute__((naked, noinline)) static unsigned long lc_probe_entry_sp(void) {
+    __asm__ volatile ("mov x0, sp\n\tret");
+}
+#define LC_ENTRY_SP_MOD 0u
+#else
+static unsigned long lc_probe_entry_sp(void) { return 0u; }
+#define LC_ENTRY_SP_MOD 0u
+#endif
+
+static int32_t align_probe_ok;
+static int32_t align_probe_ran;
+
+static void alignment_probe_func(void *arg) {
+    (void)arg;
+    align_probe_ok  = (lc_probe_entry_sp() & 15u) == LC_ENTRY_SP_MOD;
+    align_probe_ran = 1;
+}
+
+static void test_coroutine_stack_alignment(void) {
+    align_probe_ok = 0;
+    align_probe_ran = 0;
+
+    lc_scheduler sched = lc_scheduler_create();
+    lc_coroutine *co = lc_coroutine_create(&sched, alignment_probe_func, NULL);
+    TEST_ASSERT_NOT_NULL(co);
+
+    lc_scheduler_run(&sched);
+
+    TEST_ASSERT_EQ(align_probe_ran, 1);
+    TEST_ASSERT_EQ(align_probe_ok, 1);  /* 16-byte-aligned local => aligned frame */
+
+    lc_scheduler_destroy(&sched);
+}
+
 /* ===== main ===== */
 
 int main(int argc, char **argv, char **envp) {
@@ -202,6 +262,9 @@ int main(int argc, char **argv, char **envp) {
 
     /* over capacity */
     TEST_RUN(test_over_capacity);
+
+    /* entry stack alignment (16-byte ABI) */
+    TEST_RUN(test_coroutine_stack_alignment);
 
     return test_main();
 }
