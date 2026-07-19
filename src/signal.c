@@ -7,10 +7,17 @@
 /*
  * x86_64 requires a restorer trampoline that calls rt_sigreturn.
  * The kernel does not provide one automatically on this architecture.
+ *
+ * This MUST be a naked function: the kernel enters it with %rsp pointing at
+ * the signal frame, and rt_sigreturn (15) restores the interrupted context
+ * from that exact stack location. A compiler-emitted prologue would move %rsp
+ * (e.g. `push %rbp` at -O0) so the kernel reads the frame at the wrong address
+ * and corrupts the restore. `naked` guarantees no prologue/epilogue at any
+ * optimization level, so it must contain only basic asm and never returns.
  */
 #if defined(__x86_64__)
-static void signal_restorer(void) {
-    __asm__ volatile("mov $15, %%rax\n\tsyscall" ::: "rax", "rcx", "r11");
+__attribute__((naked)) static void signal_restorer(void) {
+    __asm__ volatile("mov $15, %rax\n\tsyscall");
 }
 #endif
 
