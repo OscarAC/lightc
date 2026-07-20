@@ -347,16 +347,33 @@ uint32_t lc_async_flush(lc_async_ring *ring) {
 
     uint32_t to_submit = ring->sq_pending;
 
-    /* Make the new SQEs visible to the kernel */
+    /* Publish the staged SQEs to the kernel by advancing the shared tail. The
+     * io_uring ABI requires this before io_uring_enter — the kernel reads
+     * sq_tail to discover the new entries. The release pairs with the kernel's
+     * acquire so the fully-written SQEs are visible before the advanced tail. */
     store_release(ring->sq_tail, *ring->sq_tail + to_submit);
 
-    /* Tell the kernel to process them */
-    lc_sysret ret = lc_kernel_io_ring_enter(ring->fd, to_submit, 0, 0);
-
-    if (ret < 0) return 0;  /* don't clear sq_pending on failure */
-
+    /* Once published, the entries live between the kernel's sq_head and the new
+     * sq_tail — they are no longer "staged behind the tail". Clear the pending
+     * count now, unconditionally. Retaining it across a failed/partial enter
+     * would make the next flush advance sq_tail a second time by the same
+     * amount, publishing stale/garbage SQE slots to the kernel. Any entries the
+     * kernel doesn't consume below stay queued in the ring and are submitted by
+     * a subsequent io_uring_enter. */
     ring->sq_pending = 0;
-    return (uint32_t)ret;
+
+    /* Ask the kernel to submit them. io_uring_enter may submit fewer than
+     * requested (partial) or be interrupted (EINTR); loop until all requested
+     * entries are submitted, a transient error occurs, or no progress is made
+     * (the remainder then stays queued for a later enter). */
+    uint32_t submitted = 0;
+    while (submitted < to_submit) {
+        lc_sysret ret = lc_kernel_io_ring_enter(ring->fd, to_submit - submitted, 0, 0);
+        if (ret == -LC_ERR_INTR) continue;   /* interrupted — retry */
+        if (ret <= 0) break;                 /* error, or kernel made no progress */
+        submitted += (uint32_t)ret;
+    }
+    return submitted;
 }
 
 uint32_t lc_async_wait(lc_async_ring *ring,
@@ -368,7 +385,7 @@ uint32_t lc_async_wait(lc_async_ring *ring,
     lc_sysret ret;
     do {
         ret = lc_kernel_io_ring_enter(ring->fd, 0, 1, IORING_ENTER_GETEVENTS);
-    } while (ret == -4); /* -4 = EINTR */
+    } while (ret == -LC_ERR_INTR);
 
     return reap_completions(ring, results, max_results);
 }

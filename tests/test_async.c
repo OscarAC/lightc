@@ -198,6 +198,74 @@ static void test_async_free_slots(void) {
     lc_kernel_close_file(fds[1]);
 }
 
+/* ===== Multi-cycle flush accounting ===== */
+
+/*
+ * Stress the submission bookkeeping in lc_async_flush across many separate
+ * flush cycles. Total ops (CYCLES*PER = 200) far exceed the ring size (8), so
+ * sq_tail wraps repeatedly and sq_pending is published+reset on every flush.
+ *
+ * Each cycle submits PER reads, one flush per submit (so every flush must
+ * report exactly 1 submitted), then fully drains PER completions and checks
+ * each read returned 1 byte. A tail double-advance or a lost/duplicated entry
+ * in flush would desync the ring: wrong submit counts, missing completions, or
+ * a free-slot count that never returns to full. After each cycle the ring must
+ * be fully reconciled (free slots back to the initial full count).
+ */
+static void test_async_multiflush_accounting(void) {
+    int32_t fds[2];
+    lc_sysret pr = lc_kernel_create_pipe(fds, 0);
+    TEST_ASSERT(pr >= 0);
+
+    lc_result_ptr rp = lc_async_ring_create(8);
+    TEST_ASSERT_PTR_OK(rp);
+    lc_async_ring *ring = (lc_async_ring *)rp.value;
+
+    uint32_t initial_slots = lc_async_get_free_slots(ring);
+    TEST_ASSERT(initial_slots > 0);
+
+    const int CYCLES = 50;
+    const int PER    = 4;
+    char buf[8];
+
+    for (int c = 0; c < CYCLES; c++) {
+        for (int i = 0; i < PER; i++) {
+            /* One byte in the pipe per read so the read completes immediately. */
+            lc_sysret w = lc_kernel_write_bytes(fds[1], "x", 1);
+            TEST_ASSERT_EQ(w, (lc_sysret)1);
+
+            uint64_t tag = (uint64_t)(c * PER + i) + 1;  /* unique, non-zero */
+            lc_result s = lc_async_submit_read(ring, fds[0], &buf[i], 1, (uint64_t)-1, tag);
+            TEST_ASSERT_OK(s);
+
+            uint32_t flushed = lc_async_flush(ring);
+            TEST_ASSERT_EQ(flushed, (uint32_t)1);  /* exactly one submitted */
+        }
+
+        /* Drain exactly PER completions, bounded so a regression fails instead
+         * of hanging CI. */
+        int got = 0;
+        int guard = 0;
+        while (got < PER) {
+            lc_async_result res[8];
+            uint32_t n = lc_async_wait(ring, res, 8);
+            for (uint32_t k = 0; k < n; k++) {
+                TEST_ASSERT_EQ(res[k].result, (int32_t)1);  /* read one byte */
+            }
+            got += (int)n;
+            TEST_ASSERT(++guard < 1000);  /* no infinite wait on regression */
+        }
+
+        /* Ring must be fully reconciled between cycles: everything submitted
+         * (sq_head caught up to sq_tail) and nothing left pending. */
+        TEST_ASSERT_EQ(lc_async_get_free_slots(ring), initial_slots);
+    }
+
+    lc_async_ring_destroy(ring);
+    lc_kernel_close_file(fds[0]);
+    lc_kernel_close_file(fds[1]);
+}
+
 /* ===== main ===== */
 
 int main(int argc, char **argv, char **envp) {
@@ -233,6 +301,9 @@ int main(int argc, char **argv, char **envp) {
 
     /* free slots decrease after submissions */
     TEST_RUN(test_async_free_slots);
+
+    /* multi-cycle flush accounting (tail/pending bookkeeping) */
+    TEST_RUN(test_async_multiflush_accounting);
 
     return test_main();
 }
