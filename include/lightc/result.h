@@ -55,6 +55,7 @@ enum {
     LC_ERR_NO_DYNAMIC     = 4100,
     LC_ERR_RELOC_FAILED   = 4101,
     LC_ERR_FULL           = 4102,  /* capacity exceeded (atexit table, etc.) */
+    LC_ERR_MALFORMED_ELF  = 4103,  /* structurally invalid / out-of-bounds ELF */
 };
 
 /* --- Constructors --- */
@@ -138,6 +139,7 @@ static inline const char *lc_error_name(int32_t error) {
     case LC_ERR_NO_DYNAMIC:    return "NO_DYNAMIC";
     case LC_ERR_RELOC_FAILED:  return "RELOC_FAILED";
     case LC_ERR_FULL:          return "FULL";
+    case LC_ERR_MALFORMED_ELF: return "MALFORMED_ELF";
     default:                   return "UNKNOWN";
     }
 }
