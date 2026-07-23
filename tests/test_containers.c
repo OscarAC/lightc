@@ -123,6 +123,32 @@ static void test_array_reserve(void) {
     lc_array_destroy(&arr);
 }
 
+/* Integer-overflow hardening (H3): oversized reserves must fail cleanly —
+ * neither wrap new_cap * element_size into an under-allocation (making every
+ * later push an OOB write) nor let the capacity-doubling loop wrap to 0 and
+ * spin forever. The array must stay fully usable after the failed reserve. */
+static void test_array_reserve_overflow(void) {
+    lc_array arr = lc_array_create(sizeof(uint64_t));
+    uint64_t v = 42;
+    TEST_ASSERT_PTR_OK(lc_array_push(&arr, &v));
+
+    /* new_cap * 8 overflows size_t → must report NOMEM, not under-allocate. */
+    TEST_ASSERT_ERR(lc_array_reserve(&arr, SIZE_MAX / 4));
+
+    /* min_capacity beyond SIZE_MAX/2: unchecked doubling wraps to 0 and loops
+     * forever. With the clamp this must terminate and fail (alloc rejects). */
+    TEST_ASSERT_ERR(lc_array_reserve(&arr, SIZE_MAX - 1));
+
+    /* Array is intact and still functional after the failed reserves. */
+    TEST_ASSERT_EQ(lc_array_count(&arr), 1);
+    TEST_ASSERT_EQ(*(uint64_t *)lc_array_get(&arr, 0), (uint64_t)42);
+    v = 43;
+    TEST_ASSERT_PTR_OK(lc_array_push(&arr, &v));
+    TEST_ASSERT_EQ(*(uint64_t *)lc_array_get(&arr, 1), (uint64_t)43);
+
+    lc_array_destroy(&arr);
+}
+
 static void test_array_destroy(void) {
     lc_array arr = lc_array_create(sizeof(int32_t));
     int32_t val = 1;
@@ -617,6 +643,7 @@ int main(int argc, char **argv, char **envp) {
     TEST_RUN(test_array_insert);
     TEST_RUN(test_array_remove);
     TEST_RUN(test_array_reserve);
+    TEST_RUN(test_array_reserve_overflow);
     TEST_RUN(test_array_destroy);
 
     /* HashMap tests */

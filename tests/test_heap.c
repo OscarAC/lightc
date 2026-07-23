@@ -192,6 +192,42 @@ static void test_heap_large_allocation(void) {
     lc_heap_free(ptr);
 }
 
+/* ===== Integer-overflow hardening (H3) ===== */
+
+static void test_heap_allocate_size_overflow(void) {
+    /* size + HEADER_SIZE wraps: an unchecked find_bucket maps SIZE_MAX to
+     * bucket 0 and returns a 32-byte block claiming SIZE_MAX usable bytes —
+     * a guaranteed heap overflow at first use. Must fail cleanly. */
+    lc_result_ptr r = lc_heap_allocate(SIZE_MAX);
+    TEST_ASSERT_PTR_ERR(r);
+    TEST_ASSERT_EQ(r.error, LC_ERR_NOMEM);
+
+    /* Wraps only after adding the header — same failure mode. */
+    r = lc_heap_allocate(SIZE_MAX - 8);
+    TEST_ASSERT_PTR_ERR(r);
+    TEST_ASSERT_EQ(r.error, LC_ERR_NOMEM);
+
+    /* Huge but non-wrapping: takes the large path, page round-up must not
+     * wrap either; mmap rejects it and the error propagates cleanly. */
+    r = lc_heap_allocate(SIZE_MAX / 2);
+    TEST_ASSERT_PTR_ERR(r);
+    TEST_ASSERT_EQ(r.error, LC_ERR_NOMEM);
+
+    /* Reallocate to a wrapping size must fail and leave the block intact. */
+    lc_result_ptr small = lc_heap_allocate(64);
+    TEST_ASSERT_PTR_OK(small);
+    uint8_t *bytes = (uint8_t *)small.value;
+    bytes[0] = 0xAB;
+    bytes[63] = 0xCD;
+
+    lc_result_ptr grown = lc_heap_reallocate(small.value, SIZE_MAX);
+    TEST_ASSERT_PTR_ERR(grown);
+    TEST_ASSERT_EQ(bytes[0], (uint8_t)0xAB);
+    TEST_ASSERT_EQ(bytes[63], (uint8_t)0xCD);
+
+    lc_heap_free(small.value);
+}
+
 /* ===== Alloc/free cycles ===== */
 
 static void test_heap_alloc_free_cycles(void) {
@@ -337,6 +373,9 @@ int main(int argc, char **argv, char **envp) {
 
     /* Large allocation (mmap path) */
     TEST_RUN(test_heap_large_allocation);
+
+    /* integer-overflow hardening (H3) */
+    TEST_RUN(test_heap_allocate_size_overflow);
 
     /* Alloc/free cycles */
     TEST_RUN(test_heap_alloc_free_cycles);

@@ -60,9 +60,18 @@ lc_result lc_array_reserve(lc_array *arr, size_t min_capacity) {
     if (min_capacity <= arr->capacity) return lc_ok(0);
 
     size_t new_cap = arr->capacity ? arr->capacity : ARRAY_INITIAL_CAPACITY;
-    while (new_cap < min_capacity) new_cap *= 2;
+    while (new_cap < min_capacity) {
+        /* Doubling past SIZE_MAX/2 would wrap to 0 and loop forever — clamp to
+         * the requested capacity and let the allocation decide. */
+        if (new_cap > SIZE_MAX / 2) { new_cap = min_capacity; break; }
+        new_cap *= 2;
+    }
 
-    size_t new_size = new_cap * arr->element_size;
+    /* new_cap * element_size wrapping would under-allocate while reporting a
+     * huge capacity, making every subsequent push an out-of-bounds write. */
+    size_t new_size;
+    if (__builtin_mul_overflow(new_cap, arr->element_size, &new_size))
+        return lc_err(LC_ERR_NOMEM);
     lc_result_ptr alloc = lc_heap_reallocate(arr->data, new_size);
     if (lc_ptr_is_err(alloc)) return lc_err(LC_ERR_NOMEM);
 

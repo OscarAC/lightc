@@ -8,7 +8,12 @@ static size_t align_up(size_t value, size_t alignment) {
 /* --- Raw page allocation --- */
 
 lc_result_ptr lc_allocate_pages(size_t count) {
-    void *ptr = lc_kernel_map_memory(NULL, count * LC_PAGE_SIZE,
+    /* count * LC_PAGE_SIZE must not wrap — a wrapped value would map a tiny
+     * region while the caller believes it owns `count` pages. */
+    size_t bytes;
+    if (__builtin_mul_overflow(count, (size_t)LC_PAGE_SIZE, &bytes))
+        return lc_err_ptr(LC_ERR_NOMEM);
+    void *ptr = lc_kernel_map_memory(NULL, bytes,
                                      PROT_READ | PROT_WRITE,
                                      MAP_PRIVATE | MAP_ANONYMOUS,
                                      -1, 0);
@@ -52,7 +57,10 @@ void lc_arena_destroy(lc_arena *arena) {
 void *lc_arena_allocate_aligned(lc_arena *arena, size_t size, size_t alignment) {
     size_t aligned_offset = align_up(arena->used, alignment);
 
-    if (aligned_offset + size > arena->capacity) return NULL;
+    /* Overflow-safe capacity check: aligned_offset + size must not wrap, or a
+     * huge `size` would pass the check and hand out overlapping memory. */
+    if (aligned_offset > arena->capacity || size > arena->capacity - aligned_offset)
+        return NULL;
 
     void *ptr = arena->base + aligned_offset;
     arena->used = aligned_offset + size;

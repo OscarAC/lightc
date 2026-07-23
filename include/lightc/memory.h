@@ -52,7 +52,10 @@ void *lc_arena_allocate_aligned(lc_arena *arena, size_t size, size_t alignment);
 static inline void *lc_arena_allocate(lc_arena *arena, size_t size) {
     size_t aligned_offset = (arena->used + (LC_DEFAULT_ALIGNMENT - 1))
                             & ~(size_t)(LC_DEFAULT_ALIGNMENT - 1);
-    if (__builtin_expect(aligned_offset + size > arena->capacity, 0)) return NULL;
+    /* Overflow-safe: aligned_offset + size wrapping would pass a naive check
+     * and hand out overlapping memory. */
+    if (__builtin_expect(aligned_offset > arena->capacity ||
+                         size > arena->capacity - aligned_offset, 0)) return NULL;
     void *ptr = arena->base + aligned_offset;
     arena->used = aligned_offset + size;
 #if LC_STATS

@@ -184,6 +184,42 @@ static void test_arena_overflow(void) {
     lc_arena_destroy(&arena);
 }
 
+/* ===== Integer-overflow hardening (H3) ===== */
+
+static void test_allocate_pages_count_overflow(void) {
+    /* count * LC_PAGE_SIZE wraps: (SIZE_MAX/PAGE + 2) * PAGE ≡ ~1 page. An
+     * unchecked multiply would map a tiny region and report success while the
+     * caller believes it owns ~2^52 pages. Must fail cleanly instead. */
+    lc_result_ptr r = lc_allocate_pages(SIZE_MAX / LC_PAGE_SIZE + 2);
+    TEST_ASSERT_PTR_ERR(r);
+    TEST_ASSERT_EQ(r.error, LC_ERR_NOMEM);
+}
+
+static void test_arena_size_overflow(void) {
+    lc_arena arena = lc_arena_create(4096);
+    TEST_ASSERT_NOT_NULL(arena.base);
+
+    /* Burn a few bytes so used > 0, then request a size that makes
+     * aligned_offset + size wrap past zero. A naive `offset + size > capacity`
+     * check passes on wrap and returns overlapping memory. */
+    void *p0 = lc_arena_allocate(&arena, 64);
+    TEST_ASSERT_NOT_NULL(p0);
+
+    void *huge = lc_arena_allocate(&arena, SIZE_MAX - 32);
+    TEST_ASSERT_NULL(huge);
+
+    void *huge2 = lc_arena_allocate_aligned(&arena, SIZE_MAX - 32, 16);
+    TEST_ASSERT_NULL(huge2);
+
+    /* The failed requests must not have corrupted the arena state. */
+    void *p1 = lc_arena_allocate(&arena, 64);
+    TEST_ASSERT_NOT_NULL(p1);
+    TEST_ASSERT(arena.used <= arena.capacity);
+    TEST_ASSERT((uint8_t *)p1 > (uint8_t *)p0);
+
+    lc_arena_destroy(&arena);
+}
+
 /* ===== Arena Statistics ===== */
 
 static void test_arena_stats(void) {
@@ -254,6 +290,10 @@ int main(int argc, char **argv, char **envp) {
 
     /* Arena overflow */
     TEST_RUN(test_arena_overflow);
+
+    TEST_RUN(test_allocate_pages_count_overflow);
+
+    TEST_RUN(test_arena_size_overflow);
 
     /* Arena statistics */
     TEST_RUN(test_arena_stats);

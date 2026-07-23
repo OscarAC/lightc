@@ -196,6 +196,10 @@ static lc_heap_page *page_from_pointer(void *ptr) {
 
 [[gnu::const, gnu::hot]]
 static uint32_t find_bucket(size_t size) {
+    /* size + HEADER_SIZE must not wrap: a size near SIZE_MAX would otherwise
+     * land in bucket 0 and hand out a 32-byte block claiming SIZE_MAX bytes.
+     * Route it to BUCKET_LARGE, whose path rejects oversized requests. */
+    if (size > SIZE_MAX - HEADER_SIZE) return BUCKET_LARGE;
     size_t needed = size + HEADER_SIZE;
     if (needed <= 32) return 0;
     if (needed > 4096) return BUCKET_LARGE;
@@ -543,6 +547,9 @@ lc_result_ptr lc_heap_allocate(size_t size) {
     uint32_t bucket = find_bucket(size);
 
     if (__builtin_expect(bucket == BUCKET_LARGE, 0)) {
+        /* Both size + HEADER_SIZE and the page round-up below must not wrap. */
+        if (size > SIZE_MAX - HEADER_SIZE - (LC_PAGE_SIZE - 1))
+            return lc_err_ptr(LC_ERR_NOMEM);
         size_t total = size + HEADER_SIZE;
         size_t pages = (total + LC_PAGE_SIZE - 1) / LC_PAGE_SIZE;
 
