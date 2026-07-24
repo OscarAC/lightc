@@ -124,14 +124,18 @@ typedef struct lc_heap_segment {
 typedef struct lc_heap_local {
     struct lc_heap_local *self;      /* offset 0: self-pointer (x86_64 TLS read) */
     int32_t tid;
-    struct lc_heap_local *next;      /* hash chain */
+    _Atomic(struct lc_heap_local *) next;  /* hash chain — walked locklessly */
     lc_heap_page *pages[BUCKET_COUNT]; /* per-bucket page list */
     void *tls_slots[64];             /* per-thread TLS data (used by lc_tls_get/set) */
 } lc_heap_local;
 
 /* Hash table for thread-local heaps */
 #define HEAP_LOCAL_TABLE_SIZE 64
-static lc_heap_local *heap_local_table[HEAP_LOCAL_TABLE_SIZE] = {0};
+/* Chained hash table keyed by tid. Readers walk the chains locklessly, so the
+ * slots and the per-node `next` links are atomic: writers publish a node with a
+ * release store and readers observe it (and all its initialized fields) with an
+ * acquire load. Writers still serialize their prepends under the lock. */
+static _Atomic(lc_heap_local *) heap_local_table[HEAP_LOCAL_TABLE_SIZE] = {0};
 static lc_spinlock heap_local_table_lock = LC_SPINLOCK_INIT;
 
 /* Global state */
@@ -356,35 +360,49 @@ void **lc_heap_tls_slots(void) {
     return local->tls_slots;
 }
 
-static bool main_thread_tls_ready = false;
+/*
+ * Point the main thread's TLS register at the null sentinel. Called once from
+ * _start (x86_64), before main() and therefore before any other thread can
+ * exist. This is what makes the very first `%fs:0` read on the main thread
+ * safe. It replaces a former lazy, process-global "ready" flag whose fatal flaw
+ * was that ANY thread's first allocation flipped it: a child that allocated
+ * before main did would set the flag, so main's first read then skipped its own
+ * FS setup and faulted on FS base 0. Doing it eagerly while single-threaded
+ * removes the race entirely — every thread that ever calls get_local() now has
+ * a valid TLS register (main via this call, children via CLONE_SETTLS).
+ *
+ * On aarch64 TPIDR_EL0 starts at 0 and tls_read() already treats 0 as
+ * "uninitialized" without faulting, so no eager setup is required there.
+ */
+void lc_heap_bootstrap_main_tls(void) {
+#if defined(__x86_64__)
+    tls_write(&tls_null_sentinel);
+#endif
+}
 
 static lc_heap_local *get_local(void) {
-    /* Main thread's first call: FS is 0, reading %fs:0 would segfault.
-     * Set FS to the null sentinel first. After this, tls_read() is safe
-     * for the main thread. Child threads get FS set via CLONE_SETTLS. */
-    if (__builtin_expect(!main_thread_tls_ready, 0)) {
-        main_thread_tls_ready = true;
-        tls_write(&tls_null_sentinel);
-    }
-
-    /* Fast path: read TLS register (1 instruction + 1 predicted branch).
-     * Returns non-NULL if this thread has a local heap set up.
-     * Returns NULL if TLS points at tls_null_sentinel (self = NULL). */
+    /* Fast path: read TLS register (1 instruction). Non-NULL means this thread
+     * already has a local heap. NULL means TLS points at tls_null_sentinel
+     * (self == NULL) — i.e. this is the thread's first allocation. The main
+     * thread's FS is set up in lc_heap_bootstrap_main_tls() at startup and
+     * children get theirs via CLONE_SETTLS, so this read never faults. */
     lc_heap_local *local = tls_read();
     if (local != NULL) return local;
 
     /* Slow path: first alloc on this thread */
     int32_t tid = lc_kernel_get_thread_id();
-
-    /* Check if already in hash table (e.g., thread reuse) */
     uint32_t slot = (uint32_t)tid % HEAP_LOCAL_TABLE_SIZE;
-    local = heap_local_table[slot];
-    while (local != NULL) {
+
+    /* Check if already in hash table (e.g., thread reuse). Writers publish
+     * nodes with a release store into the slot / the chain links, so acquire
+     * loads here observe fully-initialized nodes even though we hold no lock. */
+    for (local = atomic_load_explicit(&heap_local_table[slot], memory_order_acquire);
+         local != NULL;
+         local = atomic_load_explicit(&local->next, memory_order_acquire)) {
         if (local->tid == tid) {
             tls_write(local);
             return local;
         }
-        local = local->next;
     }
 
     /* Create new local heap via raw mmap (can't use lc_heap_allocate) */
@@ -398,10 +416,15 @@ static lc_heap_local *get_local(void) {
     for (uint32_t i = 0; i < BUCKET_COUNT; i++)
         local->pages[i] = NULL;
 
-    /* Insert into hash table */
+    /* Insert into the hash table. The node's fields above must be visible to a
+     * lockless reader before the node is: set `next` (relaxed — not yet
+     * published) then publish the slot with a release store that pairs with the
+     * readers' acquire loads. The lock only serializes concurrent writers. */
     lc_spinlock_acquire(&heap_local_table_lock);
-    local->next = heap_local_table[slot];
-    heap_local_table[slot] = local;
+    atomic_store_explicit(&local->next,
+                          atomic_load_explicit(&heap_local_table[slot], memory_order_relaxed),
+                          memory_order_relaxed);
+    atomic_store_explicit(&heap_local_table[slot], local, memory_order_release);
     lc_spinlock_release(&heap_local_table_lock);
 
     /* Set TLS register — all future reads are free */

@@ -7,6 +7,52 @@
 #include <lightc/heap.h>
 #include <stdatomic.h>
 
+/* ===== H1 regression: child allocates before main ever does ===== */
+
+static _Atomic(int32_t) tls_child_alloc_ok;
+
+static int32_t tls_child_first_alloc(void *arg) {
+    (void)arg;
+    /* The child's first heap allocation. Under the old racy bootstrap this set
+     * a process-global "main TLS ready" flag as a side effect. */
+    lc_result_ptr r = lc_heap_allocate(128);
+    if (lc_ptr_is_ok(r)) {
+        lc_heap_free(r.value);
+        atomic_store(&tls_child_alloc_ok, 1);
+    }
+    return 0;
+}
+
+/*
+ * Reproduces the H1 heap-TLS bootstrap race (x86_64). A child thread performs
+ * the process's very first heap allocation, then — after it exits — the main
+ * thread performs ITS first allocation. Under the old code the child's alloc
+ * flipped the shared `main_thread_tls_ready` flag, so main's first `%fs:0`
+ * read executed with FS base still 0 and segfaulted. With main's FS initialized
+ * eagerly at startup, main's first read is always safe regardless of ordering.
+ *
+ * This only discriminates while the main thread has not yet allocated, so it
+ * MUST be the first test run — nothing above it in main() may touch the heap.
+ */
+static void test_tls_child_allocates_before_main(void) {
+    atomic_store(&tls_child_alloc_ok, 0);
+
+    lc_thread t;
+    TEST_ASSERT_OK(lc_thread_create(&t, tls_child_first_alloc, NULL));
+    lc_thread_join(&t);
+    TEST_ASSERT_EQ(atomic_load(&tls_child_alloc_ok), 1);
+
+    /* Main thread's first-ever heap allocation — must not fault. */
+    lc_result_ptr r = lc_heap_allocate(128);
+    TEST_ASSERT_PTR_OK(r);
+    uint8_t *b = (uint8_t *)r.value;
+    b[0] = 0x5A;
+    b[127] = 0xA5;
+    TEST_ASSERT_EQ(b[0], (uint8_t)0x5A);
+    TEST_ASSERT_EQ(b[127], (uint8_t)0xA5);
+    lc_heap_free(r.value);
+}
+
 /* ===== lc_thread_create / lc_thread_join ===== */
 
 static _Atomic(int32_t) shared_value;
@@ -201,6 +247,10 @@ static void test_cross_thread_heap_free(void) {
 
 int main(int argc, char **argv, char **envp) {
     (void)argc; (void)argv; (void)envp;
+
+    /* H1 regression — MUST be first: no main-thread heap allocation may
+     * precede it, or the bootstrap race it targets cannot be observed. */
+    TEST_RUN(test_tls_child_allocates_before_main);
 
     /* thread create/join */
     TEST_RUN(test_thread_create_join);

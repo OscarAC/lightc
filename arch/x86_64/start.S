@@ -27,6 +27,13 @@ _start:
     /* Clear frame pointer for clean backtraces */
     xorl    %ebp, %ebp
 
+    /* Point the main thread's FS at the heap TLS null sentinel while the
+     * process is still single-threaded, so the first %fs:0 read never faults
+     * on FS base 0. Done here (not lazily in the allocator) to avoid a race
+     * with a child thread's first allocation. Clobbers caller-saved regs only;
+     * %rsp is preserved, so argc/argv/envp are read correctly afterwards. */
+    call    lc_heap_bootstrap_main_tls
+
     /* argc = *rsp */
     movq    (%rsp), %rdi
 
