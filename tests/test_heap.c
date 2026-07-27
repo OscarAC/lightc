@@ -192,6 +192,55 @@ static void test_heap_large_allocation(void) {
     lc_heap_free(ptr);
 }
 
+/* ===== H2 regression: large cache must not leak a reused mapping's tail ===== */
+
+/*
+ * Best-fit reuse can serve a large request from a bigger cached mapping. The
+ * bug: the header recorded only the requested size, so free recomputed a
+ * smaller page count and orphaned (leaked) the mapping's tail pages — the
+ * mapping could then never again satisfy a request as large as its true size.
+ *
+ * Detected by pointer identity (build-independent): a cached mapping is reused
+ * at the same base address. We cache one big mapping, reuse it for a smaller
+ * request, free it, then re-request the original big size. If the true size
+ * survived in the cache the same mapping comes back; if the tail leaked, the
+ * cache entry shrank, the big request can't reuse it, and a different mapping
+ * is returned. Sizes are chosen (33 vs 17 pages) so nothing else the suite
+ * leaves cached (<= a few pages) interferes with best-fit selection.
+ */
+static void test_heap_large_cache_no_tail_leak(void) {
+    const size_t big   = 32 * 4096;  /* needs 33 pages including the header */
+    const size_t small = 16 * 4096;  /* needs 17 pages including the header */
+
+    /* Cache a big mapping. */
+    lc_result_ptr a = lc_heap_allocate(big);
+    TEST_ASSERT_PTR_OK(a);
+    void *base = a.value;
+    lc_heap_free(a.value);
+
+    /* Reuse it for a smaller request; same base confirms the size-mismatched
+     * reuse actually happened (precondition for the leak to matter). */
+    lc_result_ptr b = lc_heap_allocate(small);
+    TEST_ASSERT_PTR_OK(b);
+    TEST_ASSERT_EQ((uintptr_t)b.value, (uintptr_t)base);
+    lc_heap_free(b.value);
+
+    /* Re-request the original big size. With the tail intact the same mapping
+     * is reused; if it leaked, a fresh (different) mapping comes back. */
+    lc_result_ptr c = lc_heap_allocate(big);
+    TEST_ASSERT_PTR_OK(c);
+    TEST_ASSERT_EQ((uintptr_t)c.value, (uintptr_t)base);
+
+    /* The full big extent must be writable — proves the mapping is really big. */
+    uint8_t *bytes = (uint8_t *)c.value;
+    bytes[0] = 0x11;
+    bytes[big - 1] = 0x22;
+    TEST_ASSERT_EQ(bytes[0], (uint8_t)0x11);
+    TEST_ASSERT_EQ(bytes[big - 1], (uint8_t)0x22);
+
+    lc_heap_free(c.value);
+}
+
 /* ===== Integer-overflow hardening (H3) ===== */
 
 static void test_heap_allocate_size_overflow(void) {
@@ -373,6 +422,9 @@ int main(int argc, char **argv, char **envp) {
 
     /* Large allocation (mmap path) */
     TEST_RUN(test_heap_large_allocation);
+
+    /* large-cache tail-leak regression (H2) */
+    TEST_RUN(test_heap_large_cache_no_tail_leak);
 
     /* integer-overflow hardening (H3) */
     TEST_RUN(test_heap_allocate_size_overflow);

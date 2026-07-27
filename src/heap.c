@@ -19,6 +19,17 @@ typedef struct {
 #define HEADER_SIZE     sizeof(lc_heap_header)
 
 /*
+ * Large (mmap-backed) blocks prefix the standard header with the mapping's true
+ * page count. Best-fit reuse can hand out a cached mapping larger than the
+ * request, so the page count must travel with the block itself — recomputing it
+ * from the requested size would under-count and leak the tail pages on free.
+ * The prefix is padded to 16 bytes so the returned pointer keeps the heap's
+ * 16-byte alignment (block is page-aligned; block + LARGE_HEADER_SIZE stays so).
+ */
+#define LARGE_PREHEADER_SIZE ((size_t)16)
+#define LARGE_HEADER_SIZE    (LARGE_PREHEADER_SIZE + HEADER_SIZE)
+
+/*
  * Debug safety checks — enabled when LC_HEAP_DEBUG is defined.
  * In release builds these are compiled out for maximum performance.
  *
@@ -570,14 +581,15 @@ lc_result_ptr lc_heap_allocate(size_t size) {
     uint32_t bucket = find_bucket(size);
 
     if (__builtin_expect(bucket == BUCKET_LARGE, 0)) {
-        /* Both size + HEADER_SIZE and the page round-up below must not wrap. */
-        if (size > SIZE_MAX - HEADER_SIZE - (LC_PAGE_SIZE - 1))
+        /* Both size + LARGE_HEADER_SIZE and the page round-up below must not wrap. */
+        if (size > SIZE_MAX - LARGE_HEADER_SIZE - (LC_PAGE_SIZE - 1))
             return lc_err_ptr(LC_ERR_NOMEM);
-        size_t total = size + HEADER_SIZE;
+        size_t total = size + LARGE_HEADER_SIZE;
         size_t pages = (total + LC_PAGE_SIZE - 1) / LC_PAGE_SIZE;
 
         /* Try the large block cache first */
         uint8_t *block = NULL;
+        size_t block_pages = pages;  /* actual page count of the mapping we use */
         lc_spinlock_acquire(&large_cache_lock);
         uint32_t best = UINT32_MAX;
         size_t best_pages = (size_t)-1;
@@ -590,6 +602,7 @@ lc_result_ptr lc_heap_allocate(size_t size) {
         }
         if (best != UINT32_MAX) {
             block = large_cache[best].ptr;
+            block_pages = large_cache[best].pages;  /* the mapping's TRUE size */
             /* Remove from cache by swapping with last */
             large_cache[best] = large_cache[--large_cache_count];
         }
@@ -603,6 +616,7 @@ lc_result_ptr lc_heap_allocate(size_t size) {
             lc_result_ptr page_alloc = lc_allocate_pages(pages);
             if (__builtin_expect(lc_ptr_is_err(page_alloc), 0)) return lc_err_ptr(LC_ERR_NOMEM);
             block = page_alloc.value;
+            block_pages = pages;
         }
 
 #if LC_STATS
@@ -610,11 +624,15 @@ lc_result_ptr lc_heap_allocate(size_t size) {
 #endif
         stat_track_alloc(size);
 
-        lc_heap_header *header = (lc_heap_header *)block;
+        /* Record the mapping's TRUE page count in the prefix so free releases
+         * the whole mapping — otherwise a reused oversized block leaks its
+         * tail pages, since free would recompute a smaller count from `size`. */
+        *(size_t *)block = block_pages;
+        lc_heap_header *header = (lc_heap_header *)(block + LARGE_PREHEADER_SIZE);
         header->size = size;
         header->bucket = BUCKET_LARGE;
         header->magic = HEAP_MAGIC;
-        return lc_ok_ptr(block + HEADER_SIZE);
+        return lc_ok_ptr((uint8_t *)header + HEADER_SIZE);
     }
 
     lc_heap_local *local = get_local();
@@ -681,15 +699,18 @@ void lc_heap_free(void *ptr) {
 #endif
 
     if (header->bucket == BUCKET_LARGE) {
-        size_t total = header->size + HEADER_SIZE;
-        size_t pages = (total + LC_PAGE_SIZE - 1) / LC_PAGE_SIZE;
+        /* The mapping base and its TRUE page count live in the large prefix,
+         * ahead of the header — use them verbatim so the whole mapping is
+         * released, including any tail beyond the requested size. */
+        uint8_t *block = (uint8_t *)header - LARGE_PREHEADER_SIZE;
+        size_t pages = *(size_t *)block;
 #if LC_HEAP_DEBUG
         header->magic = HEAP_MAGIC_FREED;
 #endif
         /* Try to cache for reuse instead of unmapping */
         lc_spinlock_acquire(&large_cache_lock);
         if (large_cache_count < LARGE_CACHE_SIZE) {
-            large_cache[large_cache_count].ptr = header;
+            large_cache[large_cache_count].ptr = block;
             large_cache[large_cache_count].pages = pages;
             large_cache_count++;
             lc_spinlock_release(&large_cache_lock);
@@ -703,13 +724,13 @@ void lc_heap_free(void *ptr) {
             if (pages > large_cache[smallest].pages) {
                 void *evict_ptr = large_cache[smallest].ptr;
                 size_t evict_pages = large_cache[smallest].pages;
-                large_cache[smallest].ptr = header;
+                large_cache[smallest].ptr = block;
                 large_cache[smallest].pages = pages;
                 lc_spinlock_release(&large_cache_lock);
                 lc_free_pages(evict_ptr, evict_pages);
             } else {
                 lc_spinlock_release(&large_cache_lock);
-                lc_free_pages(header, pages);
+                lc_free_pages(block, pages);
             }
         }
         return;
