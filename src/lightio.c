@@ -156,8 +156,18 @@ static void init_coroutine_for_slot(lio_loop *loop, int32_t slot) {
                                          PROT_READ | PROT_WRITE,
                                          MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (s->stack_base == MAP_FAILED) {
+        /* Roll the slot fully back to FREE. Marking it SLOT_FINISHED would
+         * strand it: the event loop only cleans up FINISHED slots on the path
+         * out of a RUNNING coroutine, which this slot never entered — so the
+         * client fd, the slot, and its active_count would all leak, and the
+         * phantom count would keep the loop from ever going idle. */
         s->stack_base = NULL;
-        s->state = SLOT_FINISHED;
+        if (s->fd >= 0) {
+            lc_kernel_close_file(s->fd);
+            s->fd = -1;
+        }
+        s->state = SLOT_FREE;
+        loop->active_count--;
         return;
     }
 
@@ -375,13 +385,44 @@ lc_result lio_tcp_serve(lio_loop *loop, uint16_t port, lio_handler handler) {
  * Public API: Async I/O (called from within a handler coroutine)
  * ======================================================================== */
 
+/*
+ * Stage an SQE and, if the submission queue is full, flush the ring (publishing
+ * queued SQEs to the kernel to free room) and retry once. Returns true on a
+ * successful stage. If it still fails we must NOT suspend: no SQE was queued, so
+ * no completion will ever arrive, and the coroutine would wait forever — a hang
+ * plus a slot/stack/fd leak. The caller reports the error instead.
+ */
+static bool lio_try_submit_read(lio_loop *loop, int32_t fd, void *buf,
+                                uint32_t count, uint32_t slot, int32_t *err) {
+    lc_result r = lc_async_submit_read(loop->ring, fd, buf, count, (uint64_t)-1, (uint64_t)slot);
+    if (lc_is_err(r)) {
+        lc_async_flush(loop->ring);
+        r = lc_async_submit_read(loop->ring, fd, buf, count, (uint64_t)-1, (uint64_t)slot);
+        if (lc_is_err(r)) { *err = -(int32_t)r.error; return false; }
+    }
+    return true;
+}
+
+static bool lio_try_submit_write(lio_loop *loop, int32_t fd, const void *buf,
+                                 uint32_t count, uint32_t slot, int32_t *err) {
+    lc_result r = lc_async_submit_write(loop->ring, fd, buf, count, (uint64_t)-1, (uint64_t)slot);
+    if (lc_is_err(r)) {
+        lc_async_flush(loop->ring);
+        r = lc_async_submit_write(loop->ring, fd, buf, count, (uint64_t)-1, (uint64_t)slot);
+        if (lc_is_err(r)) { *err = -(int32_t)r.error; return false; }
+    }
+    return true;
+}
+
 int32_t lio_read(lio_stream *stream, void *buf, uint32_t count) {
     lio_loop *loop = stream->loop;
     int32_t slot   = stream->slot;
 
     /* Submit read to io_uring (offset -1 = current position / no offset) */
-    (void)lc_async_submit_read(loop->ring, stream->fd, buf, count,
-                               (uint64_t)-1, (uint64_t)slot);
+    int32_t err = 0;
+    if (!lio_try_submit_read(loop, stream->fd, buf, count, (uint32_t)slot, &err)) {
+        return err;  /* fail fast rather than suspend forever */
+    }
 
     /* Suspend this coroutine */
     loop->slots[slot].state = SLOT_WAITING;
@@ -398,9 +439,14 @@ int32_t lio_write(lio_stream *stream, const void *buf, uint32_t count) {
         lio_loop *loop = stream->loop;
         int32_t slot   = stream->slot;
 
-        (void)lc_async_submit_write(loop->ring, stream->fd,
-                                    (const uint8_t *)buf + written,
-                                    count - written, (uint64_t)-1, (uint64_t)slot);
+        int32_t err = 0;
+        if (!lio_try_submit_write(loop, stream->fd,
+                                  (const uint8_t *)buf + written,
+                                  count - written, (uint32_t)slot, &err)) {
+            /* Nothing was queued; report the error rather than hang. If some
+             * bytes were already written, return that partial count instead. */
+            return written > 0 ? (int32_t)written : err;
+        }
 
         loop->slots[slot].state = SLOT_WAITING;
         lc_coroutine_switch(&loop->slots[slot].context, &loop->main_context);
@@ -448,9 +494,18 @@ void lio_sleep(lio_stream *stream, int64_t milliseconds) {
      *
      * The CQE result will be -62 (ETIME) — that's normal for a timeout.
      */
-    (void)lc_async_submit_raw(loop->ring, IORING_OP_TIMEOUT, -1,
-                              (uint64_t)(uintptr_t)&loop->timeout_specs[slot],
-                              1, 0, 0, (uint64_t)slot);
+    lc_result sr = lc_async_submit_raw(loop->ring, IORING_OP_TIMEOUT, -1,
+                                       (uint64_t)(uintptr_t)&loop->timeout_specs[slot],
+                                       1, 0, 0, (uint64_t)slot);
+    if (lc_is_err(sr)) {
+        lc_async_flush(loop->ring);
+        sr = lc_async_submit_raw(loop->ring, IORING_OP_TIMEOUT, -1,
+                                 (uint64_t)(uintptr_t)&loop->timeout_specs[slot],
+                                 1, 0, 0, (uint64_t)slot);
+        /* If the timeout still can't be queued, no completion will wake us.
+         * Return immediately (a zero-length sleep) rather than block forever. */
+        if (lc_is_err(sr)) return;
+    }
 
     loop->slots[slot].state = SLOT_WAITING;
     lc_coroutine_switch(&loop->slots[slot].context, &loop->main_context);
