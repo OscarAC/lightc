@@ -187,10 +187,17 @@ void lc_rwlock_read_unlock(lc_rwlock *rw) {
 void lc_rwlock_write_lock(lc_rwlock *rw) {
     for (;;) {
         uint32_t expected = 0;
-        if (atomic_compare_exchange_weak_explicit(&rw->state, &expected, RWLOCK_WRITE_BIT,
-                                                   memory_order_acquire, memory_order_relaxed)) {
+        /* Strong CAS: it fails only when the lock is genuinely held (state != 0),
+         * so `expected` is always non-zero on the wait path below. A weak CAS
+         * could fail spuriously with state == 0, and futex_wait(&state, 0) on a
+         * free lock would sleep with no unlock pending to wake it — a deadlock. */
+        if (atomic_compare_exchange_strong_explicit(&rw->state, &expected, RWLOCK_WRITE_BIT,
+                                                     memory_order_acquire, memory_order_relaxed)) {
             return;
         }
+        /* Only sleep while the lock is still held with the value we observed.
+         * If it was released between the CAS and here, futex_wait returns
+         * immediately (value mismatch) and we retry. */
         lc_kernel_futex_wait((int32_t *)&rw->state, (int32_t)expected);
     }
 }

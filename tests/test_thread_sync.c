@@ -227,6 +227,50 @@ static void test_rwlock_writer_excludes(void) {
     TEST_ASSERT_EQ(atomic_load(&reader_entered), 1);
 }
 
+/* ===== RWLock: writer contention (liveness + mutual exclusion) =====
+ *
+ * Drives the write-lock acquire path (CAS + futex) under heavy contention: many
+ * writers repeatedly take the write lock, mutate a NON-atomic counter, and
+ * release. If write_lock could sleep on a free lock (the H5 spurious-CAS
+ * deadlock) the run would hang; if mutual exclusion were broken the unguarded
+ * counter would lose increments and end up short.
+ */
+#define RW_WRITERS 4
+#define RW_INCS    20000
+
+static lc_rwlock rw_contend = LC_RWLOCK_INIT;
+static int64_t   rw_guarded_counter;   /* protected by rw_contend's write lock */
+
+static int32_t rwlock_writer(void *arg) {
+    (void)arg;
+    for (int i = 0; i < RW_INCS; i++) {
+        lc_rwlock_write_lock(&rw_contend);
+        rw_guarded_counter++;          /* exclusive — deliberately non-atomic */
+        lc_rwlock_write_unlock(&rw_contend);
+    }
+    return 0;
+}
+
+static void test_rwlock_writer_contention(void) {
+    rw_contend = (lc_rwlock)LC_RWLOCK_INIT;
+    rw_guarded_counter = 0;
+
+    lc_thread threads[RW_WRITERS];
+    for (int i = 0; i < RW_WRITERS; i++) {
+        TEST_ASSERT_OK(lc_thread_create(&threads[i], rwlock_writer, NULL));
+    }
+    for (int i = 0; i < RW_WRITERS; i++) {
+        lc_thread_join(&threads[i]);
+    }
+
+    /* Every increment happened exactly once under exclusive access. */
+    TEST_ASSERT_EQ(rw_guarded_counter, (int64_t)RW_WRITERS * RW_INCS);
+
+    /* The lock is fully released and immediately re-acquirable. */
+    lc_rwlock_write_lock(&rw_contend);
+    lc_rwlock_write_unlock(&rw_contend);
+}
+
 /* ===== Barrier: sync ===== */
 
 #define BARRIER_THREADS 4
@@ -360,6 +404,7 @@ int main(int argc, char **argv, char **envp) {
     /* RWLock */
     TEST_RUN(test_rwlock_multiple_readers);
     TEST_RUN(test_rwlock_writer_excludes);
+    TEST_RUN(test_rwlock_writer_contention);
 
     /* Barrier */
     TEST_RUN(test_barrier_sync);
