@@ -12,8 +12,9 @@
 _Static_assert(sizeof(lc_coroutine_context) == 56,
                "x86_64 lc_coroutine_context must be 7 * 8 = 56 bytes");
 #elif defined(__aarch64__)
-_Static_assert(sizeof(lc_coroutine_context) == 104,
-               "aarch64 lc_coroutine_context must be 13 * 8 = 104 bytes");
+_Static_assert(sizeof(lc_coroutine_context) == 168,
+               "aarch64 lc_coroutine_context must be 21 * 8 = 168 bytes"
+               " (x19-x28, x29, x30, sp, d8-d15)");
 #endif
 
 /* Implemented in arch-specific assembly (arch/{x86_64,aarch64}/coroutine.S) */
@@ -74,7 +75,14 @@ lc_scheduler lc_scheduler_create_with_capacity(uint32_t max_coroutines) {
     lc_bytes_fill(&sched, 0, sizeof(sched));
     sched.capacity = max_coroutines;
     if (max_coroutines > 0) {
-        sched.coroutines = lc_heap_allocate_zeroed(max_coroutines * sizeof(lc_coroutine)).value;
+        lc_result_ptr alloc = lc_heap_allocate_zeroed(max_coroutines * sizeof(lc_coroutine));
+        if (lc_ptr_is_err(alloc)) {
+            /* Allocation failed — leave coroutines NULL but drop capacity to 0 so
+             * lc_coroutine_create refuses instead of writing through a NULL array. */
+            sched.capacity = 0;
+        } else {
+            sched.coroutines = alloc.value;
+        }
     }
     return sched;
 }
@@ -169,26 +177,45 @@ void lc_scheduler_run(lc_scheduler *sched) {
     if (sched->count == 0) return;
 
     set_current_scheduler(sched);
-    sched->active_count = sched->count;
 
-    /* Reset all coroutines to ready */
+    /*
+     * Count the runnable (not-yet-finished) coroutines and find the first one.
+     * A FINISHED coroutine must NOT be resurrected: its saved context sits just
+     * past its final yield, right before __builtin_unreachable(), so switching
+     * back into it is undefined behavior. This also makes re-running a
+     * completed scheduler a safe no-op, and lets coroutines added after an
+     * earlier run() start cleanly on a later run().
+     */
+    uint32_t runnable = 0;
+    uint32_t first = sched->count;  /* sentinel = "none found" */
     for (uint32_t i = 0; i < sched->count; i++) {
-        sched->coroutines[i].state = LC_COROUTINE_READY;
+        if (sched->coroutines[i].state != LC_COROUTINE_FINISHED) {
+            if (first == sched->count) first = i;
+            runnable++;
+        }
     }
+    if (runnable == 0) return;  /* nothing left to run */
 
-    /* Start the first coroutine */
-    sched->current = 0;
-    sched->coroutines[0].state = LC_COROUTINE_RUNNING;
-    lc_coroutine_switch(&sched->main_context, &sched->coroutines[0].context);
+    sched->active_count = runnable;
+
+    /* Start the first runnable coroutine */
+    sched->current = first;
+    sched->coroutines[first].state = LC_COROUTINE_RUNNING;
+    lc_coroutine_switch(&sched->main_context, &sched->coroutines[first].context);
 
     /*
      * We return here when all coroutines have finished.
-     * (lc_coroutine_yield switches back to main_context when active_count == 0)
+     * (lc_coroutine_yield switches back to main_context when none remain.)
      */
 }
 
 void lc_coroutine_yield(void) {
     lc_scheduler *sched = get_current_scheduler();
+    /* Called outside a running scheduler (no scheduler on this thread, or an
+     * empty one): nothing to yield to. Return instead of NULL-dereferencing
+     * sched or dividing by a zero coroutine count below. */
+    if (sched == NULL || sched->count == 0) return;
+
     uint32_t current_idx = sched->current;
     lc_coroutine *current_co = &sched->coroutines[current_idx];
 

@@ -35,6 +35,10 @@ typedef struct {
     uint64_t x19, x20, x21, x22, x23, x24, x25, x26, x27, x28;
     uint64_t x29, x30;  /* fp, lr */
     uint64_t sp;
+    /* AAPCS64 also makes the low 64 bits of v8-v15 callee-saved, so a double
+     * (or any value the compiler pins in d8-d15) held across a context switch
+     * must be preserved too — otherwise another coroutine silently clobbers it. */
+    uint64_t d8, d9, d10, d11, d12, d13, d14, d15;
 #endif
 } lc_coroutine_context;
 

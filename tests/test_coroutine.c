@@ -111,6 +111,80 @@ static void test_coroutine_yield_interleaved(void) {
     lc_scheduler_destroy(&sched);
 }
 
+/* ===== H6 regression: aarch64 d8-d15 preserved across a context switch =====
+ *
+ * AAPCS64 makes the low 64 bits of v8-v15 callee-saved. Two coroutines each pin
+ * a distinct bit pattern into d8-d15, yield (letting the other overwrite those
+ * physical registers), then read them back. Because the values are placed by
+ * inline asm the compiler doesn't track them as live, so it won't preserve them
+ * around the yield itself — only lc_coroutine_switch can. If the switch dropped
+ * d8-d15, each coroutine would read the OTHER's pattern.
+ *
+ * x86_64 SysV has no callee-saved SIMD registers, so this concern is aarch64
+ * only; elsewhere the test is a no-op that trivially passes.
+ */
+#if defined(__aarch64__)
+static void fp_load8(const double *v) {  /* v[0..7] -> d8..d15 */
+    __asm__ volatile(
+        "ldr d8,  [%0, #0]\n\t"  "ldr d9,  [%0, #8]\n\t"
+        "ldr d10, [%0, #16]\n\t" "ldr d11, [%0, #24]\n\t"
+        "ldr d12, [%0, #32]\n\t" "ldr d13, [%0, #40]\n\t"
+        "ldr d14, [%0, #48]\n\t" "ldr d15, [%0, #56]\n\t"
+        : : "r"(v)
+        : "d8","d9","d10","d11","d12","d13","d14","d15");
+}
+static void fp_store8(double *v) {  /* d8..d15 -> v[0..7] */
+    __asm__ volatile(
+        "str d8,  [%0, #0]\n\t"  "str d9,  [%0, #8]\n\t"
+        "str d10, [%0, #16]\n\t" "str d11, [%0, #24]\n\t"
+        "str d12, [%0, #32]\n\t" "str d13, [%0, #40]\n\t"
+        "str d14, [%0, #48]\n\t" "str d15, [%0, #56]\n\t"
+        : : "r"(v) : "memory");
+}
+
+static const double fp_a_want[8] = { 11, 12, 13, 14, 15, 16, 17, 18 };
+static const double fp_b_want[8] = { 101, 102, 103, 104, 105, 106, 107, 108 };
+static double fp_a_got[8];
+static double fp_b_got[8];
+
+static void fp_coro_a(void *arg) {
+    (void)arg;
+    fp_load8(fp_a_want);    /* d8-d15 = A's pattern */
+    lc_coroutine_yield();   /* B runs, sets d8-d15 = B's pattern, yields back */
+    fp_store8(fp_a_got);    /* must still read A's pattern */
+}
+static void fp_coro_b(void *arg) {
+    (void)arg;
+    fp_load8(fp_b_want);
+    lc_coroutine_yield();
+    fp_store8(fp_b_got);
+}
+#endif
+
+static void test_coroutine_fp_callee_saved(void) {
+#if defined(__aarch64__)
+    for (int i = 0; i < 8; i++) { fp_a_got[i] = 0; fp_b_got[i] = 0; }
+
+    lc_scheduler sched = lc_scheduler_create();
+    lc_coroutine *ca = lc_coroutine_create(&sched, fp_coro_a, NULL);
+    lc_coroutine *cb = lc_coroutine_create(&sched, fp_coro_b, NULL);
+    TEST_ASSERT_NOT_NULL(ca);
+    TEST_ASSERT_NOT_NULL(cb);
+
+    lc_scheduler_run(&sched);
+
+    for (int i = 0; i < 8; i++) {
+        TEST_ASSERT(fp_a_got[i] == fp_a_want[i]);  /* A kept its d8-d15 */
+        TEST_ASSERT(fp_b_got[i] == fp_b_want[i]);  /* B kept its d8-d15 */
+    }
+
+    lc_scheduler_destroy(&sched);
+#else
+    /* No callee-saved SIMD registers on this ABI — nothing to preserve. */
+    TEST_ASSERT(true);
+#endif
+}
+
 /* ===== Coroutine with argument ===== */
 
 static int32_t received_arg;
@@ -237,10 +311,63 @@ static void test_coroutine_stack_alignment(void) {
     lc_scheduler_destroy(&sched);
 }
 
+/* ===== M2: scheduler lifecycle hazards ===== */
+
+/* Yield with no scheduler running on this thread must be a safe no-op, not a
+ * NULL-deref of the current-scheduler TLS slot. Must run before any scheduler
+ * has run on this thread, so it is registered first in main(). */
+static void test_coroutine_yield_no_scheduler(void) {
+    lc_coroutine_yield();
+    lc_coroutine_yield();
+    TEST_ASSERT(true);  /* reaching here without a crash is the assertion */
+}
+
+/* Re-running a scheduler whose coroutines have all finished must be a no-op —
+ * never resurrect a FINISHED coroutine (its context sits past its final yield,
+ * so resuming it is UB). */
+static int32_t rerun_exec_count;  /* coroutines are cooperative — plain int is fine */
+static void rerun_coro(void *arg) {
+    (void)arg;
+    rerun_exec_count++;
+}
+
+static void test_coroutine_scheduler_rerun(void) {
+    rerun_exec_count = 0;
+
+    lc_scheduler sched = lc_scheduler_create();
+    TEST_ASSERT_NOT_NULL(lc_coroutine_create(&sched, rerun_coro, NULL));
+    TEST_ASSERT_NOT_NULL(lc_coroutine_create(&sched, rerun_coro, NULL));
+
+    lc_scheduler_run(&sched);
+    TEST_ASSERT_EQ(rerun_exec_count, 2);  /* both ran exactly once */
+
+    /* Second run: nothing runnable remains — no re-exec, no UB, no crash. */
+    lc_scheduler_run(&sched);
+    TEST_ASSERT_EQ(rerun_exec_count, 2);
+
+    lc_scheduler_destroy(&sched);
+}
+
+/* A capacity whose backing array can't be allocated must leave the scheduler
+ * unusable (capacity 0) so create() refuses, rather than writing through NULL. */
+static void test_coroutine_scheduler_oom(void) {
+    lc_scheduler sched = lc_scheduler_create_with_capacity(0xFFFFFFFFu);
+    TEST_ASSERT_NULL(sched.coroutines);
+    TEST_ASSERT_EQ(sched.capacity, (uint32_t)0);
+
+    lc_coroutine *co = lc_coroutine_create(&sched, rerun_coro, NULL);
+    TEST_ASSERT_NULL(co);  /* refused — no wild write through a NULL array */
+
+    lc_scheduler_destroy(&sched);  /* safe on an empty scheduler */
+}
+
 /* ===== main ===== */
 
 int main(int argc, char **argv, char **envp) {
     (void)argc; (void)argv; (void)envp;
+
+    /* M2: yield with no scheduler — FIRST, before any scheduler runs here */
+    TEST_RUN(test_coroutine_yield_no_scheduler);
 
     /* scheduler lifecycle */
     TEST_RUN(test_scheduler_create_destroy);
@@ -254,6 +381,8 @@ int main(int argc, char **argv, char **envp) {
     /* yield interleaving */
     TEST_RUN(test_coroutine_yield_interleaved);
 
+    TEST_RUN(test_coroutine_fp_callee_saved);
+
     /* coroutine with argument */
     TEST_RUN(test_coroutine_with_argument);
 
@@ -262,6 +391,10 @@ int main(int argc, char **argv, char **envp) {
 
     /* over capacity */
     TEST_RUN(test_over_capacity);
+
+    /* M2: scheduler lifecycle hazards */
+    TEST_RUN(test_coroutine_scheduler_rerun);
+    TEST_RUN(test_coroutine_scheduler_oom);
 
     /* entry stack alignment (16-byte ABI) */
     TEST_RUN(test_coroutine_stack_alignment);
