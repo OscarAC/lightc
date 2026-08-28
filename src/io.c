@@ -29,14 +29,9 @@ void lc_writer_destroy(lc_writer *writer) {
 void lc_writer_flush(lc_writer *writer) {
     if (writer->used == 0) return;
 
-    size_t written = 0;
-    while (written < writer->used) {
-        lc_sysret ret = lc_kernel_write_bytes(writer->fd,
-                                              writer->buffer + written,
-                                              writer->used - written);
-        if (ret <= 0) break;  /* error or zero bytes — stop */
-        written += (size_t)ret;
-    }
+    /* Write the whole buffer, retrying EINTR and looping over partial writes so
+     * a signal or short write does not silently drop the tail. */
+    (void)lc_kernel_write_all(writer->fd, writer->buffer, writer->used);
     writer->used = 0;
 }
 
@@ -49,6 +44,10 @@ void lc_writer_put_byte(lc_writer *writer, uint8_t byte) {
 }
 
 void lc_writer_put_string(lc_writer *writer, const char *str, size_t length) {
+    /* No buffer (allocation failed): capacity is 0, so the loop below would spin
+     * forever making no progress. Nothing can be buffered — bail out. */
+    if (writer->buffer == NULL || writer->capacity == 0) return;
+
     size_t remaining = length;
     const char *src = str;
 
@@ -162,7 +161,10 @@ static void reader_refill(lc_reader *reader) {
     reader->position = 0;
     reader->filled   = 0;
 
-    lc_sysret ret = lc_kernel_read_bytes(reader->fd, reader->buffer, reader->capacity);
+    /* Retry EINTR so a signal mid-read is not mistaken for end-of-file. A real
+     * 0 (EOF) or hard error still ends the stream — the reader has no error
+     * channel, so both surface as end_of_file. */
+    lc_sysret ret = lc_kernel_read_retry(reader->fd, reader->buffer, reader->capacity);
     if (ret <= 0) {
         reader->end_of_file = true;
     } else {
@@ -285,19 +287,18 @@ lc_result lc_file_read_all(const char *path, uint8_t **out_data, size_t *out_siz
         return lc_err(LC_ERR_NOMEM);
     }
 
-    /* Read the entire file */
-    size_t total = 0;
-    while (total < file_size) {
-        lc_sysret ret = lc_kernel_read_bytes(fd, data + total, file_size - total);
-        if (ret <= 0) break;
-        total += (size_t)ret;
-    }
+    /* Read the entire file, retrying EINTR and looping over short reads. */
+    lc_sysret r = lc_kernel_read_all(fd, data, file_size);
 
     lc_kernel_close_file(fd);
 
-    if (total != file_size) {
+    if (r < 0) {
         lc_heap_free(data);
-        return lc_err(LC_ERR_IO);
+        return lc_err((int32_t)(-r));  /* real error, not an interrupted read */
+    }
+    if ((size_t)r != file_size) {
+        lc_heap_free(data);
+        return lc_err(LC_ERR_IO);  /* file shrank / truncated mid-read */
     }
 
     *out_data = data;
@@ -310,18 +311,13 @@ lc_result lc_file_write_all(const char *path, const void *data, size_t size) {
     if (fd_ret < 0) return lc_err((int32_t)(-fd_ret));
     int32_t fd = (int32_t)fd_ret;
 
-    size_t written = 0;
-    while (written < size) {
-        lc_sysret ret = lc_kernel_write_bytes(fd, (const uint8_t *)data + written,
-                                              size - written);
-        if (ret <= 0) {
-            lc_kernel_close_file(fd);
-            return lc_err(ret < 0 ? (int32_t)(-ret) : LC_ERR_IO);
-        }
-        written += (size_t)ret;
-    }
+    /* Write everything, retrying EINTR and looping over partial writes. */
+    lc_sysret w = lc_kernel_write_all(fd, data, size);
 
     lc_kernel_close_file(fd);
+
+    if (w < 0) return lc_err((int32_t)(-w));  /* real error, not an interrupted write */
+    if ((size_t)w != size) return lc_err(LC_ERR_IO);
     return lc_ok((int64_t)size);
 }
 

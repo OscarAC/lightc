@@ -6,6 +6,9 @@
 #include <lightc/io.h>
 #include <lightc/syscall.h>
 #include <lightc/string.h>
+#include <lightc/signal.h>
+#include <lightc/time.h>
+#include <lightc/heap.h>
 
 /* Helper: create a pipe pair, returning 0 on success. */
 static int pipe_create(int32_t *read_fd, int32_t *write_fd) {
@@ -294,6 +297,94 @@ static void test_writer_reader_roundtrip(void) {
     lc_kernel_close_file(rfd);
 }
 
+/* ===== M1: writer with a failed buffer allocation must not spin ===== */
+
+/* A writer whose buffer allocation failed has capacity 0. put_string's chunking
+ * loop makes no progress at capacity 0 and, unguarded, spins forever. With the
+ * guard it returns immediately, so this test simply completing (not timing out)
+ * is the assertion. */
+static void test_writer_put_string_no_buffer(void) {
+    lc_writer w = lc_writer_create(1, (size_t)-1);  /* SIZE_MAX -> allocation fails */
+    TEST_ASSERT_NULL(w.buffer);
+    TEST_ASSERT_EQ(w.capacity, (size_t)0);
+
+    lc_writer_put_string(&w, "data", 4);  /* must return, not hang */
+    lc_writer_put_byte(&w, 'x');          /* also guarded */
+    TEST_ASSERT(true);
+
+    lc_writer_destroy(&w);
+}
+
+/* ===== M1: lc_file_write_all / lc_file_read_all round-trip ===== */
+
+static void test_file_write_read_all(void) {
+    const char *path = "build/m1_io_roundtrip.tmp";
+    const char payload[] = "lightc file I/O round-trip \x01\x02\x03 payload";
+    const size_t len = sizeof(payload) - 1;
+
+    TEST_ASSERT_OK(lc_file_write_all(path, payload, len));
+
+    uint8_t *data = NULL;
+    size_t size = 0;
+    TEST_ASSERT_OK(lc_file_read_all(path, &data, &size));
+    TEST_ASSERT_EQ(size, len);
+    TEST_ASSERT_NOT_NULL(data);
+    TEST_ASSERT_STR_EQ((const char *)data, size, payload, len);
+
+    lc_heap_free(data);
+    (void)lc_kernel_unlinkat(AT_FDCWD, path, 0);
+}
+
+/* ===== M1: a signal must not truncate a buffered read (EINTR retry) ===== */
+
+static volatile int32_t eintr_sig_count;
+static void eintr_sig_handler(int signo) { (void)signo; eintr_sig_count++; }
+
+/*
+ * The reader blocks in a refill on an empty pipe; a child interrupts it with
+ * SIGUSR1 (the handler is installed without SA_RESTART, so the read returns
+ * EINTR), then delivers the data a moment later. With the EINTR-retry fix the
+ * refill resumes and returns "PING"; without it, EINTR is mistaken for
+ * end-of-file and the stream data is lost (read returns 0 bytes).
+ */
+static void test_io_reader_eintr(void) {
+    int32_t rfd, wfd;
+    TEST_ASSERT_EQ(pipe_create(&rfd, &wfd), 0);
+
+    eintr_sig_count = 0;
+    TEST_ASSERT_OK(lc_signal_handle(SIGUSR1, eintr_sig_handler));
+
+    int32_t parent = lc_kernel_get_process_id();
+    lc_sysret pid = lc_kernel_fork();
+    TEST_ASSERT(pid >= 0);
+    if (pid == 0) {
+        /* Child: interrupt the parent's blocking read, then feed it the data. */
+        lc_time_sleep_milliseconds(40);
+        lc_kernel_send_signal(parent, SIGUSR1);
+        lc_time_sleep_milliseconds(40);
+        (void)lc_kernel_write_bytes(wfd, "PING", 4);
+        lc_time_sleep_milliseconds(20);
+        lc_kernel_exit(0);
+    }
+
+    lc_reader r = lc_reader_create(rfd, 64);
+    char buf[8];
+    lc_bytes_fill(buf, 0, sizeof(buf));
+    size_t n = lc_reader_read_bytes(&r, buf, 4);
+
+    int32_t status = 0;
+    lc_kernel_wait_for_child((int32_t)pid, &status, 0);
+
+    TEST_ASSERT_EQ(n, (size_t)4);            /* data survived the signal */
+    TEST_ASSERT_STR_EQ(buf, n, "PING", 4);
+    TEST_ASSERT(eintr_sig_count >= 1);       /* a signal really did interrupt */
+
+    lc_reader_destroy(&r);
+    (void)lc_signal_reset(SIGUSR1);
+    lc_kernel_close_file(rfd);
+    lc_kernel_close_file(wfd);
+}
+
 /* ===== main ===== */
 
 int main(int argc, char **argv, char **envp) {
@@ -319,6 +410,11 @@ int main(int argc, char **argv, char **envp) {
 
     /* Round-trip */
     TEST_RUN(test_writer_reader_roundtrip);
+
+    /* M1: EINTR / partial-I/O handling */
+    TEST_RUN(test_writer_put_string_no_buffer);
+    TEST_RUN(test_file_write_read_all);
+    TEST_RUN(test_io_reader_eintr);
 
     return test_main();
 }

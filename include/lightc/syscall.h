@@ -172,6 +172,64 @@ static inline lc_sysret lc_kernel_write_bytes(int32_t fd, const void *buf, size_
     return lc_syscall3(SYS_write, fd, (int64_t)buf, (int64_t)count);
 }
 
+/*
+ * EINTR- and partial-I/O-safe wrappers.
+ *
+ * The raw read/write syscalls can (a) fail with -EINTR when a signal arrives —
+ * a transient condition that must be retried, not treated as EOF or a hard
+ * error — and (b) transfer fewer bytes than requested. All buffered I/O, print,
+ * and logging should go through these instead of the raw calls so a signal or a
+ * short write never silently drops data.
+ */
+
+/* Write all `count` bytes: retries EINTR, loops over partial writes. Returns
+ * `count` on full success, a negative errno on a hard error before completion,
+ * or a short count if the fd stops accepting bytes (e.g. a 0-return). */
+static inline lc_sysret lc_kernel_write_all(int32_t fd, const void *buf, size_t count) {
+    const uint8_t *p = (const uint8_t *)buf;
+    size_t written = 0;
+    while (written < count) {
+        lc_sysret ret = lc_syscall3(SYS_write, fd, (int64_t)(p + written),
+                                    (int64_t)(count - written));
+        if (ret < 0) {
+            if (ret == -LC_ERR_INTR) continue;  /* interrupted — retry */
+            return ret;                          /* hard error */
+        }
+        if (ret == 0) break;                     /* no progress */
+        written += (size_t)ret;
+    }
+    return (lc_sysret)written;
+}
+
+/* Single read that retries only EINTR. A short read is normal and returned as
+ * is (0 = EOF); the caller decides whether to loop. Negative = hard error. */
+static inline lc_sysret lc_kernel_read_retry(int32_t fd, void *buf, size_t count) {
+    for (;;) {
+        lc_sysret ret = lc_syscall3(SYS_read, fd, (int64_t)buf, (int64_t)count);
+        if (ret == -LC_ERR_INTR) continue;
+        return ret;
+    }
+}
+
+/* Read up to `count` bytes, retrying EINTR and looping over short reads until
+ * the buffer is full or EOF. Returns the byte count (< count means EOF) or a
+ * negative errno on a hard error. */
+static inline lc_sysret lc_kernel_read_all(int32_t fd, void *buf, size_t count) {
+    uint8_t *p = (uint8_t *)buf;
+    size_t total = 0;
+    while (total < count) {
+        lc_sysret ret = lc_syscall3(SYS_read, fd, (int64_t)(p + total),
+                                    (int64_t)(count - total));
+        if (ret < 0) {
+            if (ret == -LC_ERR_INTR) continue;
+            return ret;         /* hard error */
+        }
+        if (ret == 0) break;    /* EOF */
+        total += (size_t)ret;
+    }
+    return (lc_sysret)total;
+}
+
 static inline lc_sysret lc_kernel_seek_position(int32_t fd, int64_t offset, int32_t whence) {
     return lc_syscall3(SYS_lseek, fd, offset, whence);
 }

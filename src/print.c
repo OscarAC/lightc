@@ -3,15 +3,15 @@
 #include <lightc/syscall.h>
 
 void lc_print_char(int32_t fd, char c) {
-    lc_kernel_write_bytes(fd, &c, 1);
+    lc_kernel_write_all(fd, &c, 1);
 }
 
 void lc_print_string(int32_t fd, const char *str, size_t length) {
-    lc_kernel_write_bytes(fd, str, length);
+    lc_kernel_write_all(fd, str, length);
 }
 
 void lc_print_line(int32_t fd, const char *str, size_t length) {
-    lc_kernel_write_bytes(fd, str, length);
+    lc_kernel_write_all(fd, str, length);
     lc_print_char(fd, '\n');
 }
 
@@ -34,7 +34,7 @@ void lc_print_unsigned(int32_t fd, uint64_t value) {
         value /= 10;
     }
 
-    lc_kernel_write_bytes(fd, p, (size_t)(buf + sizeof(buf) - p));
+    lc_kernel_write_all(fd, p, (size_t)(buf + sizeof(buf) - p));
 }
 
 void lc_print_signed(int32_t fd, int64_t value) {
@@ -54,7 +54,7 @@ void lc_print_hex(int32_t fd, uint64_t value) {
     char *p = buf + sizeof(buf);
 
     if (value == 0) {
-        lc_kernel_write_bytes(fd, "0x0", 3);
+        lc_kernel_write_all(fd, "0x0", 3);
         return;
     }
 
@@ -66,7 +66,7 @@ void lc_print_hex(int32_t fd, uint64_t value) {
     *--p = 'x';
     *--p = '0';
 
-    lc_kernel_write_bytes(fd, p, (size_t)(buf + sizeof(buf) - p));
+    lc_kernel_write_all(fd, p, (size_t)(buf + sizeof(buf) - p));
 }
 
 void lc_print_byte_hex(int32_t fd, uint8_t value) {
@@ -74,7 +74,7 @@ void lc_print_byte_hex(int32_t fd, uint8_t value) {
         hex_digits[value >> 4],
         hex_digits[value & 0xf]
     };
-    lc_kernel_write_bytes(fd, pair, 2);
+    lc_kernel_write_all(fd, pair, 2);
 }
 
 void lc_print_double(int32_t fd, double value) {
@@ -82,5 +82,5 @@ void lc_print_double(int32_t fd, double value) {
     lc_format fmt = lc_format_start(buf, sizeof(buf));
     lc_format_add_double(&fmt, value);
     size_t len = lc_format_finish(&fmt);
-    lc_kernel_write_bytes(fd, buf, len);
+    lc_kernel_write_all(fd, buf, len);
 }

@@ -115,7 +115,7 @@ static void write_json_line(lc_log_level level, const char *message, size_t msg_
 
     /* Write atomically under the spinlock */
     lc_spinlock_acquire(&log_lock);
-    lc_kernel_write_bytes(log_fd, buf, len);
+    lc_kernel_write_all(log_fd, buf, len);
     lc_spinlock_release(&log_lock);
 }
 
@@ -135,9 +135,9 @@ static void write_log_line(lc_log_level level, const char *message, size_t msg_l
 
     /* Write atomically: prefix + message + newline */
     lc_spinlock_acquire(&log_lock);
-    lc_kernel_write_bytes(log_fd, prefix, prefix_len);
-    lc_kernel_write_bytes(log_fd, message, msg_len);
-    lc_kernel_write_bytes(log_fd, "\n", 1);
+    lc_kernel_write_all(log_fd, prefix, prefix_len);
+    lc_kernel_write_all(log_fd, message, msg_len);
+    lc_kernel_write_all(log_fd, "\n", 1);
     lc_spinlock_release(&log_lock);
 }
 
