@@ -86,8 +86,14 @@ void lc_thread_join(lc_thread *thread) {
         lc_kernel_futex_wait((int32_t *)&thread->alive, tid);
     }
 
-    /* Thread is done — free its stack */
-    lc_kernel_unmap_memory(thread->stack_base, thread->stack_size);
+    /* Free the stack exactly once. Claim it with an atomic exchange so a second
+     * (or concurrent) join is a no-op — unmapping an already-freed range would
+     * tear down whatever a later mmap has since reused that address for, causing
+     * a delayed SIGSEGV elsewhere. */
+    void *stack = __atomic_exchange_n(&thread->stack_base, NULL, __ATOMIC_ACQ_REL);
+    if (stack != NULL) {
+        lc_kernel_unmap_memory(stack, thread->stack_size);
+    }
 }
 
 /* --- Spinlock --- */

@@ -5,6 +5,7 @@
 #include "test.h"
 #include <lightc/thread.h>
 #include <lightc/heap.h>
+#include <lightc/syscall.h>
 #include <stdatomic.h>
 
 /* ===== H1 regression: child allocates before main ever does ===== */
@@ -243,6 +244,42 @@ static void test_cross_thread_heap_free(void) {
     TEST_ASSERT_EQ(atomic_load(&cross_free_done), 1);
 }
 
+/* ===== M4: lc_thread_join is idempotent ===== */
+
+static int32_t noop_thread(void *arg) { (void)arg; return 0; }
+
+/*
+ * A second join must not unmap the stack again. We capture the stack range,
+ * join once (which frees it), then force a new mapping onto the exact freed
+ * range with MAP_FIXED and write a sentinel. A second join that still unmaps
+ * would tear that mapping down, so reading the sentinel back would SIGSEGV;
+ * with the idempotent join it survives.
+ */
+static void test_thread_join_idempotent(void) {
+    lc_thread t;
+    TEST_ASSERT_OK(lc_thread_create(&t, noop_thread, NULL));
+
+    void  *base = t.stack_base;
+    size_t size = t.stack_size;
+    TEST_ASSERT_NOT_NULL(base);
+
+    lc_thread_join(&t);                     /* first join frees [base, base+size) */
+
+    /* Deterministically reuse the freed range and stamp a sentinel into it. */
+    void *reused = lc_kernel_map_memory(base, size, PROT_READ | PROT_WRITE,
+                                        MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+    TEST_ASSERT(reused != MAP_FAILED);
+    TEST_ASSERT_EQ((uintptr_t)reused, (uintptr_t)base);
+    volatile uint32_t *sentinel = (volatile uint32_t *)reused;
+    *sentinel = 0xC0DECAFEu;
+
+    lc_thread_join(&t);                     /* second join — must NOT unmap `reused` */
+
+    TEST_ASSERT_EQ(*sentinel, 0xC0DECAFEu); /* mapping intact => no double-unmap */
+
+    lc_kernel_unmap_memory(reused, size);
+}
+
 /* ===== main ===== */
 
 int main(int argc, char **argv, char **envp) {
@@ -254,6 +291,7 @@ int main(int argc, char **argv, char **envp) {
 
     /* thread create/join */
     TEST_RUN(test_thread_create_join);
+    TEST_RUN(test_thread_join_idempotent);
 
     /* multiple threads — atomic counter */
     TEST_RUN(test_multiple_threads_atomic);

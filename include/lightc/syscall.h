@@ -52,6 +52,7 @@ lc_sysret lc_syscall6(int64_t nr, int64_t a0, int64_t a1, int64_t a2, int64_t a3
 /* mmap flags */
 #define MAP_SHARED    0x01
 #define MAP_PRIVATE   0x02
+#define MAP_FIXED     0x10
 #define MAP_ANONYMOUS 0x20
 #define MAP_FAILED    ((void *)-1)
 
