@@ -21,8 +21,12 @@ typedef struct {
     size_t   element_size;
     size_t   capacity;      /* always power of 2 */
     size_t   mask;           /* capacity - 1, for fast modulo */
-    size_t   head;           /* read position */
-    size_t   tail;           /* write position */
+    /* head/tail are atomic so the SPSC contract above actually holds: the
+     * producer publishes a slot write with a release store to `tail`, and the
+     * consumer observes it (and the data) with an acquire load — and vice versa
+     * for `head`. A single-threaded caller is unaffected. */
+    _Atomic(size_t) head;    /* read position (owned by the consumer) */
+    _Atomic(size_t) tail;    /* write position (owned by the producer) */
 } lc_ringbuf;
 
 /* Create ring buffer. Capacity is rounded up to next power of 2. */

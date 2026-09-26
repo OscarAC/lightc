@@ -8,6 +8,7 @@
 #include <lightdata/list.h>
 #include <lightc/heap.h>
 #include <lightc/string.h>
+#include <stdatomic.h>
 
 /* ========================================================================
  * Helpers
@@ -411,42 +412,60 @@ void lc_ringbuf_destroy(lc_ringbuf *ring) {
     ring->data     = NULL;
     ring->capacity = 0;
     ring->mask     = 0;
-    ring->head     = 0;
-    ring->tail     = 0;
+    atomic_store_explicit(&ring->head, 0, memory_order_relaxed);
+    atomic_store_explicit(&ring->tail, 0, memory_order_relaxed);
 }
 
 lc_result lc_ringbuf_push(lc_ringbuf *ring, const void *element) {
     if (ring->data == NULL) return lc_err(LC_ERR_FULL);
-    if (lc_ringbuf_is_full(ring)) return lc_err(LC_ERR_FULL);
 
-    size_t offset = (ring->tail & ring->mask) * ring->element_size;
+    /* Producer owns `tail` (relaxed); it needs an acquire view of the
+     * consumer's `head` to know whether a slot is free. */
+    size_t tail = atomic_load_explicit(&ring->tail, memory_order_relaxed);
+    size_t head = atomic_load_explicit(&ring->head, memory_order_acquire);
+    if (tail - head == ring->capacity) return lc_err(LC_ERR_FULL);
+
+    size_t offset = (tail & ring->mask) * ring->element_size;
     lc_bytes_copy(ring->data + offset, element, ring->element_size);
-    ring->tail++;
+    /* Release: the slot write above must be visible before the consumer sees
+     * the bumped tail. */
+    atomic_store_explicit(&ring->tail, tail + 1, memory_order_release);
     return lc_ok(0);
 }
 
 bool lc_ringbuf_pop(lc_ringbuf *ring, void *out) {
-    if (lc_ringbuf_is_empty(ring)) return false;
+    /* Consumer owns `head` (relaxed); acquire on `tail` pairs with the
+     * producer's release so both the count and the slot data are visible. */
+    size_t head = atomic_load_explicit(&ring->head, memory_order_relaxed);
+    size_t tail = atomic_load_explicit(&ring->tail, memory_order_acquire);
+    if (head == tail) return false;
 
-    size_t offset = (ring->head & ring->mask) * ring->element_size;
+    size_t offset = (head & ring->mask) * ring->element_size;
     lc_bytes_copy(out, ring->data + offset, ring->element_size);
-    ring->head++;
+    /* Release: signal the slot is free only after the read completes, so the
+     * producer does not overwrite it early. */
+    atomic_store_explicit(&ring->head, head + 1, memory_order_release);
     return true;
 }
 
 void *lc_ringbuf_peek(const lc_ringbuf *ring) {
-    if (lc_ringbuf_is_empty(ring)) return NULL;
+    size_t head = atomic_load_explicit(&ring->head, memory_order_relaxed);
+    size_t tail = atomic_load_explicit(&ring->tail, memory_order_acquire);
+    if (head == tail) return NULL;
 
-    size_t offset = (ring->head & ring->mask) * ring->element_size;
+    size_t offset = (head & ring->mask) * ring->element_size;
     return ring->data + offset;
 }
 
 size_t lc_ringbuf_count(const lc_ringbuf *ring) {
-    return ring->tail - ring->head;
+    size_t tail = atomic_load_explicit(&ring->tail, memory_order_acquire);
+    size_t head = atomic_load_explicit(&ring->head, memory_order_acquire);
+    return tail - head;
 }
 
 bool lc_ringbuf_is_empty(const lc_ringbuf *ring) {
-    return ring->head == ring->tail;
+    return atomic_load_explicit(&ring->tail, memory_order_acquire) ==
+           atomic_load_explicit(&ring->head, memory_order_acquire);
 }
 
 bool lc_ringbuf_is_full(const lc_ringbuf *ring) {
@@ -454,8 +473,8 @@ bool lc_ringbuf_is_full(const lc_ringbuf *ring) {
 }
 
 void lc_ringbuf_clear(lc_ringbuf *ring) {
-    ring->head = 0;
-    ring->tail = 0;
+    atomic_store_explicit(&ring->head, 0, memory_order_relaxed);
+    atomic_store_explicit(&ring->tail, 0, memory_order_relaxed);
 }
 
 /* ========================================================================

@@ -9,6 +9,8 @@
 #include <lightdata/hashmap.h>
 #include <lightdata/ringbuf.h>
 #include <lightdata/list.h>
+#include <lightc/thread.h>
+#include <stdatomic.h>
 
 /* ========================================================================
  * lc_array tests
@@ -416,6 +418,52 @@ static void test_ringbuf_destroy(void) {
     TEST_ASSERT_NULL(ring.data);
 }
 
+/* ===== M5: single-producer / single-consumer across threads =====
+ *
+ * A producer thread pushes 0..N-1 through a small ring while the consumer (this
+ * thread) pops them. A missing release on `tail` (or acquire on the reader)
+ * would let the consumer observe a bumped index before the slot write, reading
+ * torn/garbage data; a lost or duplicated slot would break the strict 0,1,2,...
+ * sequence. The small ring forces thousands of wrap-arounds so the SPSC
+ * hand-off is exercised heavily. (On strongly-ordered x86 a missing barrier may
+ * not surface at runtime, but the fix is required by the C memory model — a
+ * data race on plain size_t indices is UB the compiler may reorder at -O2.)
+ */
+#define SPSC_N 100000
+static lc_ringbuf spsc_ring;
+
+static int32_t spsc_producer(void *arg) {
+    (void)arg;
+    for (int32_t i = 0; i < SPSC_N; i++) {
+        while (lc_is_err(lc_ringbuf_push(&spsc_ring, &i))) {
+            /* ring full — spin until the consumer frees a slot */
+        }
+    }
+    return 0;
+}
+
+static void test_ringbuf_spsc_concurrent(void) {
+    spsc_ring = lc_ringbuf_create(sizeof(int32_t), 64);  /* small => many wraps */
+    TEST_ASSERT_NOT_NULL(spsc_ring.data);
+
+    lc_thread prod;
+    TEST_ASSERT_OK(lc_thread_create(&prod, spsc_producer, NULL));
+
+    int32_t expected = 0;
+    while (expected < SPSC_N) {
+        int32_t v;
+        if (lc_ringbuf_pop(&spsc_ring, &v)) {
+            TEST_ASSERT_EQ(v, expected);  /* in order, no gaps, no garbage */
+            expected++;
+        }
+    }
+
+    lc_thread_join(&prod);
+    TEST_ASSERT_EQ(expected, SPSC_N);
+    TEST_ASSERT(lc_ringbuf_is_empty(&spsc_ring));
+    lc_ringbuf_destroy(&spsc_ring);
+}
+
 static void test_ringbuf_fifo_order(void) {
     lc_ringbuf ring = lc_ringbuf_create(sizeof(int32_t), 16);
     for (int32_t i = 0; i < 10; i++) {
@@ -670,6 +718,7 @@ int main(int argc, char **argv, char **envp) {
     TEST_RUN(test_ringbuf_clear);
     TEST_RUN(test_ringbuf_destroy);
     TEST_RUN(test_ringbuf_fifo_order);
+    TEST_RUN(test_ringbuf_spsc_concurrent);
 
     /* List tests */
     TEST_RUN(test_list_init);
