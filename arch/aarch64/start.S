@@ -10,6 +10,16 @@
 .type _start, %function
 
 _start:
+    /* Clear frame pointer */
+    mov     x29, #0
+    mov     x30, #0
+
+    /* Capture the kernel's real page size (AT_PAGESZ) from the auxv while the
+     * initial stack is still intact. sp points at argc; the call preserves sp,
+     * so the argument setup below is unaffected. */
+    mov     x0, sp
+    bl      lc_runtime_init
+
     /* argc = *sp */
     ldr     x0, [sp]
 
@@ -20,10 +30,6 @@ _start:
     add     x2, x0, #1
     lsl     x2, x2, #3
     add     x2, x1, x2
-
-    /* Clear frame pointer */
-    mov     x29, #0
-    mov     x30, #0
 
     bl      main
 

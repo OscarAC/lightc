@@ -1,5 +1,6 @@
 #include <lightc/thread.h>
 #include <lightc/syscall.h>
+#include <lightc/memory.h>
 
 /*
  * clone flags for thread creation:
@@ -43,7 +44,10 @@ lc_result lc_thread_create(lc_thread *thread, lc_thread_func func, void *arg) {
 
 lc_result lc_thread_create_with_stack(lc_thread *thread, lc_thread_func func, void *arg,
                                       size_t stack_size) {
-    size_t guard_size = 4096;  /* one page guard */
+    /* One real page of guard. mprotect rounds a sub-page length up to a full
+     * page, so using the kernel's actual page size keeps the guard from eating
+     * into the usable stack on 16K/64K-page aarch64 kernels. */
+    size_t guard_size = lc_runtime_page_size();
     size_t total_size = stack_size + guard_size;
 
     void *stack = lc_kernel_map_memory(NULL, total_size,
@@ -52,8 +56,12 @@ lc_result lc_thread_create_with_stack(lc_thread *thread, lc_thread_func func, vo
                                        -1, 0);
     if (stack == MAP_FAILED) return lc_err(LC_ERR_NOMEM);
 
-    /* Guard page at the bottom (lowest address) — stack overflow hits this */
-    lc_kernel_protect_memory(stack, guard_size, PROT_NONE);
+    /* Guard page at the bottom (lowest address) — stack overflow hits this. If
+     * we cannot establish it, fail rather than hand out an unguarded stack. */
+    if (lc_kernel_protect_memory(stack, guard_size, PROT_NONE) < 0) {
+        lc_kernel_unmap_memory(stack, total_size);
+        return lc_err(LC_ERR_NOMEM);
+    }
 
     thread->stack_base = stack;
     thread->stack_size = total_size;

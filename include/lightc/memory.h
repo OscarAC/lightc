@@ -14,6 +14,22 @@
 #define LC_DEFAULT_ALIGNMENT 16
 
 /*
+ * The kernel's actual page size (AT_PAGESZ), captured once at startup by
+ * lc_runtime_init (called from _start). LC_PAGE_SIZE above is the compile-time
+ * allocation-granularity assumption (4 KiB); this is the real page size, which
+ * on aarch64 kernels may be 16 KiB or 64 KiB. Guard pages must use THIS value —
+ * mprotect rounds a sub-page length up to a full page, so a hardcoded 4096 on a
+ * 64 KiB-page kernel would silently steal ~60 KiB of the adjacent stack.
+ */
+size_t lc_runtime_page_size(void);
+
+/* Walk the process's auxiliary vector for AT_PAGESZ and cache it. `stack_top`
+ * points at argc, exactly as the kernel leaves the stack at process entry.
+ * Called once from _start before main(); safe to leave uncalled (defaults to
+ * LC_PAGE_SIZE). */
+void lc_runtime_init(void *stack_top);
+
+/*
  * LC_STATS controls arena statistics tracking.
  * Default: on in debug (no NDEBUG), off in release.
  * Override: compile with -DLC_STATS=1 to force on, -DLC_STATS=0 to force off.

@@ -259,6 +259,38 @@ static void test_arena_stats(void) {
     lc_arena_destroy(&arena);
 }
 
+/* ===== M6: runtime page size (AT_PAGESZ) ===== */
+
+/* The page size captured at startup must be sane: a power of two of at least
+ * 4 KiB (and exactly 4 KiB on x86_64, whose base pages are always 4 KiB). */
+static void test_runtime_page_size(void) {
+    size_t ps = lc_runtime_page_size();
+    TEST_ASSERT(ps >= 4096);
+    TEST_ASSERT((ps & (ps - 1)) == 0);  /* power of two */
+#if defined(__x86_64__)
+    TEST_ASSERT_EQ(ps, (size_t)4096);
+#endif
+}
+
+/* Deterministically exercises the auxv parser on a hand-built entry stack:
+ * argc=1, one argv, empty envp, then an auxv carrying a known AT_PAGESZ. If the
+ * argc/argv/envp offset math were wrong, it would read the wrong slot and miss
+ * the value. Runs LAST because it overwrites the process-global page size. */
+static void test_runtime_page_size_parse_auxv(void) {
+    uint64_t fake[8];
+    fake[0] = 1;                      /* argc */
+    fake[1] = (uint64_t)(uintptr_t)"x"; /* argv[0] */
+    fake[2] = 0;                      /* argv NULL terminator */
+    fake[3] = 0;                      /* envp[0] == NULL (no environment) */
+    fake[4] = 6;                      /* AT_PAGESZ */
+    fake[5] = 16384;                  /* the value the parser must extract */
+    fake[6] = 0;                      /* AT_NULL */
+    fake[7] = 0;
+
+    lc_runtime_init(fake);
+    TEST_ASSERT_EQ(lc_runtime_page_size(), (size_t)16384);
+}
+
 /* ===== main ===== */
 
 int main(int argc, char **argv, char **envp) {
@@ -297,6 +329,11 @@ int main(int argc, char **argv, char **envp) {
 
     /* Arena statistics */
     TEST_RUN(test_arena_stats);
+
+    /* M6: runtime page size — real captured value first, then the parser test
+     * (which mutates the global) last. */
+    TEST_RUN(test_runtime_page_size);
+    TEST_RUN(test_runtime_page_size_parse_auxv);
 
     return test_main();
 }

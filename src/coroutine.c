@@ -3,6 +3,7 @@
 #include <lightc/string.h>
 #include <lightc/heap.h>
 #include <lightc/thread.h>
+#include <lightc/memory.h>
 
 /*
  * Verify that the assembly context-switch offsets match the C struct layout.
@@ -97,8 +98,11 @@ lc_coroutine *lc_coroutine_create(lc_scheduler *sched, lc_coroutine_func func, v
     lc_coroutine *co = &sched->coroutines[sched->count];
     sched->count++;
 
-    /* Allocate a stack via mmap, with a guard page at the bottom */
-    size_t guard_size = 4096;
+    /* Allocate a stack via mmap, with a guard page at the bottom. Use the
+     * kernel's real page size: mprotect rounds a sub-page length up to a full
+     * page, so a hardcoded 4096 on a 16K/64K-page kernel would steal most of
+     * the coroutine's stack for the guard. */
+    size_t guard_size = lc_runtime_page_size();
     size_t total_size = LC_COROUTINE_STACK_SIZE + guard_size;
     void *stack = lc_kernel_map_memory(NULL, total_size,
                                        PROT_READ | PROT_WRITE,
@@ -109,8 +113,13 @@ lc_coroutine *lc_coroutine_create(lc_scheduler *sched, lc_coroutine_func func, v
         return NULL;
     }
 
-    /* Guard page at the bottom (lowest address) — stack overflow hits this */
-    lc_kernel_protect_memory(stack, guard_size, PROT_NONE);
+    /* Guard page at the bottom (lowest address) — stack overflow hits this. If
+     * it can't be established, unmap and fail rather than run unguarded. */
+    if (lc_kernel_protect_memory(stack, guard_size, PROT_NONE) < 0) {
+        lc_kernel_unmap_memory(stack, total_size);
+        sched->count--;
+        return NULL;
+    }
 
     co->func       = func;
     co->arg        = arg;

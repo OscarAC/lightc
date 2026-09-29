@@ -34,6 +34,12 @@ _start:
      * %rsp is preserved, so argc/argv/envp are read correctly afterwards. */
     call    lc_heap_bootstrap_main_tls
 
+    /* Capture the kernel's real page size (AT_PAGESZ) from the auxv while the
+     * initial stack is still intact. %rsp points at argc; it is callee-saved
+     * across the call, so the argument setup below is unaffected. */
+    movq    %rsp, %rdi
+    call    lc_runtime_init
+
     /* argc = *rsp */
     movq    (%rsp), %rdi
 

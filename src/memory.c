@@ -5,6 +5,42 @@ static size_t align_up(size_t value, size_t alignment) {
     return (value + alignment - 1) & ~(alignment - 1);
 }
 
+/* --- Runtime page size (AT_PAGESZ) --- */
+
+#define LC_AT_NULL    0
+#define LC_AT_PAGESZ  6
+
+/* Defaults to the compile-time assumption; lc_runtime_init overwrites it with
+ * the kernel's real page size at startup. Reads after startup are single-writer
+ * / never-mutated-again, so a plain size_t is fine. */
+static size_t runtime_page_size = LC_PAGE_SIZE;
+
+size_t lc_runtime_page_size(void) {
+    return runtime_page_size;
+}
+
+void lc_runtime_init(void *stack_top) {
+    if (stack_top == NULL) return;
+
+    /* Stack at entry: [argc][argv[0..argc-1]][NULL][envp...][NULL][auxv...] */
+    uint64_t *sp   = (uint64_t *)stack_top;
+    uint64_t  argc = sp[0];
+    char    **argv = (char **)(sp + 1);
+    char    **envp = argv + argc + 1;      /* skip argv and its NULL terminator */
+
+    char **e = envp;
+    while (*e != NULL) e++;                 /* walk to the end of envp */
+    e++;                                     /* step past NULL — auxv begins here */
+
+    uint64_t *aux = (uint64_t *)e;
+    for (; aux[0] != LC_AT_NULL; aux += 2) {
+        if (aux[0] == LC_AT_PAGESZ) {
+            if (aux[1] != 0) runtime_page_size = (size_t)aux[1];
+            return;
+        }
+    }
+}
+
 /* --- Raw page allocation --- */
 
 lc_result_ptr lc_allocate_pages(size_t count) {
